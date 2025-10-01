@@ -1,0 +1,41 @@
+============================================================
+UPLOAD COMMANDS - Run from Your Windows Laptop
+============================================================
+
+Current Compute Node: s1cmp010.pax.tufts.edu
+From Directory: C:\Users\sdtyu\Documents\CursorRoot
+
+--- METHOD 1: Direct to Compute Node (Fastest) ---
+scp HPC/test_load_big_model.py zwu09@s1cmp010.pax.tufts.edu:/cluster/tufts/datalab/zwu09/
+scp HPC/lm_studio_server_v3_improved.py zwu09@s1cmp010.pax.tufts.edu:/cluster/tufts/datalab/zwu09/
+scp HPC/LOAD_MODELS_CORRECTLY.md zwu09@s1cmp010.pax.tufts.edu:/cluster/tufts/datalab/zwu09/
+
+--- METHOD 2: Via Login Node (Always works) ---
+scp HPC/test_load_big_model.py zwu09@login.pax.tufts.edu:~/
+scp HPC/lm_studio_server_v3_improved.py zwu09@login.pax.tufts.edu:~/
+
+Then SSH and move:
+ssh zwu09@login.pax.tufts.edu
+mv ~/test_load_big_model.py /cluster/tufts/datalab/zwu09/
+mv ~/lm_studio_server_v3_improved.py /cluster/tufts/datalab/zwu09/
+
+--- METHOD 3: Upload All at Once ---
+scp HPC/*.py HPC/*.md zwu09@login.pax.tufts.edu:/cluster/tufts/datalab/zwu09/
+
+============================================================
+After Upload - Restart Server on HPC:
+============================================================
+# Kill old server
+ps aux | grep lm_studio_server | grep -v grep | awk '{print $2}' | xargs kill
+
+# Start new server
+cd /cluster/tufts/datalab/zwu09
+source /cluster/tufts/hpc/tools/anaconda/202307/etc/profile.d/conda.sh
+conda activate lmstudio_v3
+export HF_TOKEN=YOUR_HF_TOKEN_HERE
+export PYTHONNOUSERSITE=1
+nohup python lm_studio_server_v3_improved.py > lm_studio.log 2>&1 &
+
+# Check it started
+tail -30 lm_studio.log
+

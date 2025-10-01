@@ -1,8 +1,32 @@
-__pycache__/
-*.py[cod]
+# Protect sensitive files
+*TOKEN*
+*token*
+*password*
+*secret*
+*key*
+*.key
+*.pem
+*.p12
+*.pfx
+
+# Ignore temporary files
+*.tmp
+*.temp
 *.log
-nohup.out
+*.cache
+*~
+
+# Ignore system files
 .DS_Store
-caches/
-tmp/
-*.bak
+Thumbs.db
+desktop.ini
+
+# Ignore IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Ignore backup files
+*backup*
+*recovery*

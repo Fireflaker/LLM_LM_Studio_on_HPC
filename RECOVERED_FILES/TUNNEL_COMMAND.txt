@@ -1,0 +1,18 @@
+============================================================
+SSH TUNNEL COMMAND - Run this in a NEW LOCAL terminal
+============================================================
+
+Compute Node: s1cmp010.pax.tufts.edu
+Server Port: 8080
+
+--- WINDOWS GIT BASH ---
+ssh -J zwu09@login.pax.tufts.edu -L 8080:127.0.0.1:8080 zwu09@s1cmp010.pax.tufts.edu
+
+--- WINDOWS POWERSHELL ---
+& 'C:\Windows\System32\OpenSSH\ssh.exe' -J 'zwu09@login.pax.tufts.edu' -L 8080:127.0.0.1:8080 "zwu09@s1cmp010.pax.tufts.edu"
+
+After tunnel is connected:
+🌐 Open browser: http://localhost:8080
+
+============================================================
+

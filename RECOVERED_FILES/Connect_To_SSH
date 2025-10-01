@@ -1,0 +1,9 @@
+
+# On laptop → login
+ssh zwu09@login.pax.tufts.edu
+
+# On login → job
+JOBID=$(squeue -u "$USER" -h -o '%i' | head -1); NODE=$(squeue -j "$JOBID" -h -o '%N'); echo "JOBID=$JOBID NODE=$NODE"; scontrol show job "$JOBID" | sed -n '1,20p'; ssh -o StrictHostKeyChecking=no "$NODE"
+
+
+
