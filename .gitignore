@@ -1,0 +1,8 @@
+__pycache__/
+*.py[cod]
+*.log
+nohup.out
+.DS_Store
+caches/
+tmp/
+*.bak
