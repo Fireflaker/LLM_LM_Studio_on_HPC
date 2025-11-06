@@ -1,0 +1,2470 @@
+import os
+import subprocess
+import sys
+import tkinter as tk
+from tkinter import ttk, messagebox, simpledialog
+import threading
+import queue
+
+
+DEFAULT_GPU_PARTITION = "preempt"
+DEFAULT_GPUS = "l40s:2"
+DEFAULT_CPUS = "30"
+DEFAULT_MEM = "40G"
+DEFAULT_TIME = "2:00:00"
+DEFAULT_PORT = 7860
+DEFAULT_TOKEN = "allen"
+
+
+def which(cmd: str) -> bool:
+    return subprocess.call(["where" if os.name == "nt" else "which", cmd],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) == 0
+
+
+class App(tk.Tk):
+    def __init__(self):
+        super().__init__()
+        self.title("Tufts HPC LLM & Jupyter Launcher")
+        self.geometry("1000x700")
+
+        self.user_var = tk.StringVar(value="zwu09")
+        self.partition_var = tk.StringVar(value=DEFAULT_GPU_PARTITION)
+        self.gres_var = tk.StringVar(value=DEFAULT_GPUS)
+        self.cpus_var = tk.StringVar(value=DEFAULT_CPUS)
+        self.mem_var = tk.StringVar(value=DEFAULT_MEM)
+        self.time_var = tk.StringVar(value=DEFAULT_TIME)
+        self.port_var = tk.IntVar(value=DEFAULT_PORT)
+        self.token_var = tk.StringVar(value=DEFAULT_TOKEN)
+        self.node_var = tk.StringVar(value="")
+        self.persistent_var = tk.BooleanVar(value=True)
+
+        self._build()
+        self._init_debug()
+
+    def _build(self):
+        frm = ttk.Frame(self, padding=12)
+        frm.pack(fill=tk.BOTH, expand=True)
+
+        row = 0
+        ttk.Label(frm, text="Tufts UTLN (username)").grid(row=row, column=0, sticky=tk.W)
+        ttk.Entry(frm, textvariable=self.user_var, width=22).grid(row=row, column=1, sticky=tk.W)
+
+        row += 1
+        ttk.Label(frm, text="Partition").grid(row=row, column=0, sticky=tk.W)
+        ttk.Entry(frm, textvariable=self.partition_var, width=12).grid(row=row, column=1, sticky=tk.W)
+        ttk.Label(frm, text="GRES (GPU)").grid(row=row, column=2, sticky=tk.W)
+        ttk.Entry(frm, textvariable=self.gres_var, width=12).grid(row=row, column=3, sticky=tk.W)
+
+        row += 1
+        ttk.Label(frm, text="CPUs").grid(row=row, column=0, sticky=tk.W)
+        ttk.Entry(frm, textvariable=self.cpus_var, width=8).grid(row=row, column=1, sticky=tk.W)
+        ttk.Label(frm, text="Memory").grid(row=row, column=2, sticky=tk.W)
+        ttk.Entry(frm, textvariable=self.mem_var, width=8).grid(row=row, column=3, sticky=tk.W)
+
+        row += 1
+        ttk.Label(frm, text="Time").grid(row=row, column=0, sticky=tk.W)
+        ttk.Entry(frm, textvariable=self.time_var, width=10).grid(row=row, column=1, sticky=tk.W)
+        ttk.Label(frm, text="Jupyter Port").grid(row=row, column=2, sticky=tk.W)
+        ttk.Entry(frm, textvariable=self.port_var, width=8).grid(row=row, column=3, sticky=tk.W)
+
+        row += 1
+        ttk.Label(frm, text="Token").grid(row=row, column=0, sticky=tk.W)
+        ttk.Entry(frm, textvariable=self.token_var, width=12).grid(row=row, column=1, sticky=tk.W)
+
+        row += 1
+        ttk.Separator(frm).grid(row=row, column=0, columnspan=4, sticky=tk.EW, pady=6)
+
+        row += 1
+        ttk.Button(frm, text="Start LLM Server (auto)", command=self.start_llm_server).grid(row=row, column=0, sticky=tk.W)
+        ttk.Button(frm, text="Start Jupyter (auto)", command=self.start_jupyter).grid(row=row, column=1, sticky=tk.W)
+        ttk.Label(frm, text="Compute Node").grid(row=row, column=2, sticky=tk.E)
+        ttk.Entry(frm, textvariable=self.node_var, width=16).grid(row=row, column=3, sticky=tk.W)
+
+        row += 1
+        ttk.Button(frm, text="Open Tunnel", command=self.open_tunnel).grid(row=row, column=0, sticky=tk.W)
+        ttk.Button(frm, text="Copy Tunnel Cmd", command=self.copy_tunnel_cmd).grid(row=row, column=1, sticky=tk.W)
+        ttk.Button(frm, text="Watch GPU", command=self.watch_gpu).grid(row=row, column=2, sticky=tk.W)
+        ttk.Button(frm, text="Check Resources", command=self.check_resources).grid(row=row, column=3, sticky=tk.W)
+
+        row += 1
+        ttk.Separator(frm).grid(row=row, column=0, columnspan=4, sticky=tk.EW, pady=6)
+
+        row += 1
+        ttk.Button(frm, text="Open Login Shell", command=self.open_login_shell).grid(row=row, column=0, sticky=tk.W)
+        ttk.Button(frm, text="Copy Login Cmd", command=self.copy_login_cmd).grid(row=row, column=1, sticky=tk.W)
+        ttk.Button(frm, text="Open Allocation Shell", command=self.open_alloc_shell).grid(row=row, column=2, sticky=tk.W)
+        ttk.Button(frm, text="Copy Allocation Cmd", command=self.copy_alloc_cmd).grid(row=row, column=3, sticky=tk.W)
+
+        row += 1
+        ttk.Button(frm, text="Copy LLM Setup Cmds", command=self.copy_llm_setup_cmds).grid(row=row, column=0, sticky=tk.W)
+        ttk.Button(frm, text="Copy LLM Auto Script", command=self.copy_llm_auto_start_script).grid(row=row, column=1, sticky=tk.W)
+        ttk.Button(frm, text="Copy Jupyter Setup Cmds", command=self.copy_setup_cmds).grid(row=row, column=2, sticky=tk.W)
+        ttk.Button(frm, text="Copy Jupyter Auto Script", command=self.copy_auto_start_script).grid(row=row, column=3, sticky=tk.W)
+
+        row += 1
+        ttk.Button(frm, text="Test TensorFlow", command=self.test_tensorflow).grid(row=row, column=0, sticky=tk.W)
+        ttk.Button(frm, text="Copy TF Test Cmd", command=self.copy_tf_test_cmd).grid(row=row, column=1, sticky=tk.W)
+        ttk.Button(frm, text="Start ComfyUI", command=self.start_comfyui).grid(row=row, column=2, sticky=tk.W)
+        ttk.Button(frm, text="Copy ComfyUI Setup", command=self.copy_comfyui_setup).grid(row=row, column=3, sticky=tk.W)
+
+        row += 1
+        ttk.Button(frm, text="Install Model", command=self.install_model).grid(row=row, column=0, sticky=tk.W)
+        ttk.Button(frm, text="Copy Model Install", command=self.copy_model_install).grid(row=row, column=1, sticky=tk.W)
+        ttk.Button(frm, text="Start Persistent Env", command=self.start_persistent_env).grid(row=row, column=2, sticky=tk.W)
+        ttk.Button(frm, text="Copy Persistent Env", command=self.copy_persistent_env).grid(row=row, column=3, sticky=tk.W)
+
+        row += 1
+        ttk.Button(frm, text="Fix Current Env", command=self.fix_current_env, style="Accent.TButton").grid(row=row, column=0, sticky=tk.W)
+        ttk.Button(frm, text="Setup Wan 2.2 Clean", command=self.setup_wan22_clean, style="Accent.TButton").grid(row=row, column=1, sticky=tk.W)
+        ttk.Button(frm, text="Copy Wan 2.2 Setup", command=self.copy_wan22_setup).grid(row=row, column=2, sticky=tk.W)
+        ttk.Button(frm, text="Copy Fix Script", command=self.copy_fix_script).grid(row=row, column=3, sticky=tk.W)
+
+        row += 1
+        ttk.Button(frm, text="Backup All User Files", command=self.backup_comfyui_user_files).grid(row=row, column=0, sticky=tk.W)
+        ttk.Button(frm, text="Download All Files (SCP)", command=self.copy_download_user_files).grid(row=row, column=1, sticky=tk.W)
+        ttk.Button(frm, text="Clean All User Files", command=self.copy_clean_user_files).grid(row=row, column=2, sticky=tk.W)
+
+        row += 1
+        ttk.Separator(frm).grid(row=row, column=0, columnspan=4, sticky=tk.EW, pady=6)
+
+        row += 1
+        ttk.Label(frm, text="H200 GPU Node (login-prod)", font=("TkDefaultFont", 9, "bold")).grid(row=row, column=0, columnspan=2, sticky=tk.W)
+        ttk.Button(frm, text="H200 Login", command=self.open_h200_login).grid(row=row, column=2, sticky=tk.W)
+        ttk.Button(frm, text="Copy H200 Login", command=self.copy_h200_login_cmd).grid(row=row, column=3, sticky=tk.W)
+
+        row += 1
+        ttk.Button(frm, text="H200 Allocation", command=self.open_h200_alloc).grid(row=row, column=0, sticky=tk.W)
+        ttk.Button(frm, text="Copy H200 Allocation", command=self.copy_h200_alloc_cmd).grid(row=row, column=1, sticky=tk.W)
+        ttk.Button(frm, text="H200 ComfyUI Setup", command=self.start_h200_comfyui).grid(row=row, column=2, sticky=tk.W)
+        ttk.Button(frm, text="Copy H200 ComfyUI", command=self.copy_h200_comfyui_setup).grid(row=row, column=3, sticky=tk.W)
+
+        row += 1
+        ttk.Button(frm, text="Copy H200 Tunnel", command=self.copy_h200_tunnel).grid(row=row, column=0, sticky=tk.W)
+
+        row += 1
+        ttk.Checkbutton(frm, text="Persistent SSH mode (use your open login shell)", variable=self.persistent_var).grid(row=row, column=0, columnspan=3, sticky=tk.W)
+
+        row += 1
+        ttk.Separator(frm).grid(row=row, column=0, columnspan=4, sticky=tk.EW, pady=6)
+
+        row += 1
+        ttk.Label(frm, text="Job IDs (comma/space-separated)").grid(row=row, column=0, sticky=tk.W)
+        self.jobs_entry = ttk.Entry(frm, width=28)
+        self.jobs_entry.grid(row=row, column=1, sticky=tk.W)
+        ttk.Button(frm, text="List My Jobs", command=self.list_jobs).grid(row=row, column=2, sticky=tk.W)
+        ttk.Button(frm, text="Cancel Job(s)", command=self.cancel_jobs).grid(row=row, column=3, sticky=tk.W)
+
+        row += 1
+        ttk.Button(frm, text="Cancel ALL My Jobs", command=self.cancel_all_jobs).grid(row=row, column=2, sticky=tk.W)
+
+        row += 1
+        ttk.Separator(frm).grid(row=row, column=0, columnspan=4, sticky=tk.EW, pady=6)
+
+        row += 1
+        tips = (
+            "CRITICAL SETUP SEQUENCE: source /etc/profile.d/modules.sh → module load cuda/12.2 → conda activate allen\n"
+            "LLM Workflow: Start LLM Server → copy NODE → Open Tunnel → http://localhost:7860\n"
+            "Jupyter Workflow: Start Jupyter → copy NODE → Open Tunnel → http://localhost:<port>/?token=<token>\n"
+            "ComfyUI Workflow: Start ComfyUI → copy NODE → Open Tunnel → http://localhost:<port>\n"
+            "H200 Workflow: H200 Login → H200 Allocation → H200 ComfyUI Setup → Copy H200 Tunnel → http://localhost:7860\n"
+            "Backup Workflow: Backup All User Files → Download All Files (SCP) → Clean All User Files (after verifying)\n"
+            "Environment: Uses 'allen' conda env in em212class (unlimited storage)\n"
+            "Video Environment: Uses 'video_gen' conda env for ComfyUI video generation\n"
+            "H200 GPU: Uses login-prod.pax.tufts.edu, partition 'gpu', GPU h200, 16 CPUs, 120G RAM, 5hr timeout\n"
+            "TensorFlow: 2.20.0 with GPU support (1 GPU detected)\n"
+            "Toolchain: CUDA 12.2 + Anaconda 2024.10 + TensorFlow 2.20.0\n"
+            "GPU Monitoring: Use 'Watch GPU' button to monitor nvidia-smi in real-time\n"
+            "ComfyUI: Video generation with AnimateDiff, Video Helper Suite, memory optimization"
+        )
+        ttk.Label(frm, text=tips, foreground="#333").grid(row=row, column=0, columnspan=4, sticky=tk.W)
+
+        # Embedded shell / logs at bottom
+        shell_frame = ttk.LabelFrame(self, text="Interactive Shell & Logs", padding=6)
+        shell_frame.pack(fill=tk.BOTH, expand=True)
+        self.shell_text = tk.Text(shell_frame, height=14, wrap=tk.NONE, bg="#0d1117", fg="#d0d7de")
+        self.shell_text.pack(fill=tk.BOTH, expand=True)
+        self.cmd_entry = ttk.Entry(shell_frame)
+        self.cmd_entry.pack(fill=tk.X)
+        self.cmd_entry.bind("<Return>", self._on_cmd_enter)
+        btns = ttk.Frame(shell_frame)
+        btns.pack(fill=tk.X)
+        ttk.Button(btns, text="Run Local Cmd", command=self._run_local_cmd).pack(side=tk.LEFT)
+        ttk.Button(btns, text="Clear", command=lambda: self.shell_text.delete("1.0", tk.END)).pack(side=tk.LEFT)
+
+    def _powershell(self) -> str:
+        return os.path.join(os.environ.get("SystemRoot", r"C:\\Windows"), "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
+
+    def start_llm_server(self):
+        self._log_debug("start_llm_server invoked")
+        if not which("ssh"):
+            messagebox.showerror("Missing SSH", "OpenSSH client (ssh) is not on PATH")
+            return
+        user = self.user_var.get().strip()
+        part = self.partition_var.get().strip()
+        gres = self.gres_var.get().strip()
+        cpus = self.cpus_var.get().strip()
+        mem = self.mem_var.get().strip()
+        time = self.time_var.get().strip()
+        port = int(self.port_var.get())
+
+        # LLM Server setup script
+        script = f"""
+        $ErrorActionPreference = 'Stop'
+        $user = '{user}'
+        $port = {port}
+        ssh $user@login.pax.tufts.edu -tt @'
+          set -e
+          echo "Requesting GPU allocation for LLM server..."
+          srun -p {part} --gres=gpu:{gres} -c {cpus} --mem={mem} -t {time} --pty bash <<'EOF'
+            set -e
+            echo "=== Activating conda environment ==="
+            source /cluster/tufts/hpc/tools/anaconda/202307/etc/profile.d/conda.sh
+            conda activate lmstudio_v3
+            
+            echo "=== Setting environment variables ==="
+            export HF_TOKEN=hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+            export PYTHONNOUSERSITE=1
+            export HF_HOME=/cluster/tufts/datalab/$USER/caches/huggingface
+            export TRANSFORMERS_CACHE=/cluster/tufts/datalab/$USER/caches/huggingface
+            
+            echo "=== Navigating to text-generation-webui ==="
+            cd /cluster/tufts/datalab/$USER/text-generation-webui
+            
+            echo "=== Starting LLM server with 2x H100 GPUs ==="
+            nohup python server.py --listen --listen-port $port --autosplit --no_flash_attn --trust-remote-code --verbose > server.log 2>&1 < /dev/null &
+            
+            echo "=== Server started, checking status ==="
+            sleep 3
+            ps aux | grep server.py | grep -v grep
+            
+            echo "=== Compute node: $(hostname) ==="
+            echo "=== Server process: $(pgrep -f server.py) ==="
+            echo "=== Port: $port ==="
+            echo "=== To access: ssh -L $port:$(hostname):$port $user@login.pax.tufts.edu ==="
+            echo "=== Then open: http://localhost:$port ==="
+            
+            # Keep the session alive
+            tail -f server.log
+          EOF
+        '@
+        """
+
+        if self.persistent_var.get():
+            self._log_debug("persistent mode: copying LLM auto start script")
+            self.copy_llm_auto_start_script()
+        else:
+            if os.name == "nt":
+                self._run_powershell_file(script)
+            else:
+                self._spawn_terminal(script)
+
+    def start_jupyter(self):
+        self._log_debug("start_jupyter invoked")
+        if not which("ssh"):
+            messagebox.showerror("Missing SSH", "OpenSSH client (ssh) is not on PATH")
+            return
+        user = self.user_var.get().strip()
+        part = self.partition_var.get().strip()
+        gres = self.gres_var.get().strip()
+        cpus = self.cpus_var.get().strip()
+        mem = self.mem_var.get().strip()
+        time = self.time_var.get().strip()
+        port = int(self.port_var.get())
+        token = self.token_var.get().strip()
+
+        # Jupyter setup script - user must run srun first
+        script = f"""
+        $ErrorActionPreference = 'Stop'
+        $user = '{user}'
+        $port = {port}
+        $token = '{token}'
+        ssh $user@login.pax.tufts.edu -tt @'
+          set -e
+          echo "=== JUPYTER SETUP SCRIPT ==="
+          echo "⚠️  WARNING: You must be on a compute node first!"
+          echo "Run: srun -p {part} --gres=gpu:{gres} -c {cpus} --mem={mem} -t {time} --pty bash"
+          echo ""
+          
+          # CRITICAL: Check we're NOT on login node
+          if [[ $(hostname) == login* ]]; then
+              echo "❌❌❌ FATAL ERROR: ON LOGIN NODE ❌❌❌"
+              echo "NEVER run computational work on login nodes!"
+              echo "You will get yelled at by admins!"
+              echo ""
+              echo "Request compute node with:"
+              echo "srun -p {part} --gres=gpu:{gres} -c {cpus} --mem={mem} -t {time} --pty bash"
+              exit 1
+          fi
+          
+          echo "✅ On compute node: $(hostname)"
+          
+          # CRITICAL: Initialize module system first
+          echo "=== Initializing module system ==="
+          source /etc/profile.d/modules.sh
+          
+          # Load CUDA module
+          echo "=== Loading CUDA 12.2 module ==="
+          module load cuda/12.2
+          
+          # Initialize conda
+          echo "=== Initializing conda ==="
+          source /cluster/tufts/hpc/tools/anaconda/202307/etc/profile.d/conda.sh
+          
+          # Verify conda is working
+          echo "=== Verifying conda initialization ==="
+          which conda || {{ echo "❌ Conda not found - initialization failed"; exit 1; }}
+          conda --version || {{ echo "❌ Conda version check failed"; exit 1; }}
+          
+          # Activate allen environment (em212class location)
+          echo "=== Activating allen environment ==="
+          conda activate /cluster/tufts/em212class/$USER/conda_envs/allen
+          
+          # Set CUDA paths for TensorFlow
+          echo "=== Setting CUDA paths ==="
+          export LD_LIBRARY_PATH=/usr/local/cuda-12.2/lib64:$LD_LIBRARY_PATH
+          export CUDA_HOME=/usr/local/cuda-12.2
+          
+          # Verify environment activation
+          echo "=== Verifying environment ==="
+          which python || {{ echo "❌ Python not found in environment"; exit 1; }}
+          python -c "import sys; print('Python:', sys.executable)" || {{ echo "❌ Python import failed"; exit 1; }}
+          
+          # Test TensorFlow with GPU detection (FIXED STRING ESCAPING)
+          echo "=== Testing TensorFlow with GPU ==="
+          python -c "
+import tensorflow as tf
+print('✅ TensorFlow version:', tf.__version__)
+print('✅ CUDA support:', tf.test.is_built_with_cuda())
+print('✅ GPU devices:', len(tf.config.list_physical_devices('GPU')))
+print('✅ GPU details:', tf.config.list_physical_devices('GPU'))
+" || {{ echo "❌ TensorFlow test failed - check module system and CUDA setup"; exit 1; }}
+          
+          # Navigate to NLP homework directory
+          cd /cluster/tufts/em212class/$USER/NLP-Fall25
+          
+          echo "=== Starting Jupyter Lab ==="
+          echo "=== Node: $(hostname) ==="
+          echo "=== Port: $port ==="
+          echo "=== Token: $token ==="
+          echo "=== Access: http://localhost:$port/?token=$token ==="
+          
+          jupyter lab --ip=0.0.0.0 --port=$port --no-browser --allow-root --NotebookApp.token='' --NotebookApp.password=''
+        '@
+        """
+
+        # In persistent mode, copy the auto-start script so user pastes it in the existing login shell
+        if self.persistent_var.get():
+            self._log_debug("persistent mode: copying auto start script instead of spawning new SSH")
+            self.clipboard_clear()
+            # Reuse the copy_auto_start_script content
+            self.copy_auto_start_script()
+        else:
+            # Use temp PowerShell script on Windows to avoid quoting errors
+            if os.name == "nt":
+                self._run_powershell_file(script)
+            else:
+                self._spawn_terminal(script)
+
+    def open_tunnel(self):
+        self._log_debug("open_tunnel invoked")
+        if not which("ssh"):
+            messagebox.showerror("Missing SSH", "OpenSSH client (ssh) is not on PATH")
+            return
+        user = self.user_var.get().strip()
+        node = self.node_var.get().strip()
+        port = int(self.port_var.get())
+        if not node:
+            messagebox.showwarning("Missing node", "Enter the compute node hostname (e.g., cc1gpu005)")
+            return
+
+        cmd = f"ssh -J {user}@login.pax.tufts.edu -L {port}:127.0.0.1:{port} {user}@{node}"
+        self._spawn_terminal(cmd)
+
+    def copy_tunnel_cmd(self):
+        self._log_debug("copy_tunnel_cmd invoked")
+        user = self.user_var.get().strip()
+        node = self.node_var.get().strip()
+        port = int(self.port_var.get())
+        cmd = f"ssh -J {user}@login.pax.tufts.edu -L {port}:127.0.0.1:{port} {user}@{node}"
+        self.clipboard_clear()
+        self.clipboard_append(cmd)
+        messagebox.showinfo("Copied", "SSH tunnel command copied to clipboard")
+
+    def check_resources(self):
+        self._log_debug("check_resources invoked")
+        if not which("ssh"):
+            messagebox.showerror("Missing SSH", "OpenSSH client (ssh) is not on PATH")
+            return
+        user = self.user_var.get().strip()
+        # Open a terminal and run a concise cluster status script on the login node
+        script = f"""
+        $ErrorActionPreference = 'Stop'
+        $user = '{user}'
+        $cmd = @'
+set -e
+echo "Node: $(hostname)  User: $USER"
+echo "=== HOME ===";    df -h /cluster/home/$USER       | sed -n '1,2p'
+echo "=== DATALAB ==="; df -h /cluster/tufts/datalab    | sed -n '1,2p'
+echo "=== Your jobs ==="; squeue -u $USER | sed -n '1,20p'
+echo "=== Partitions ==="; sinfo -o "%P %a %l %D %c %m %G" | sed -n '1,20p' || true
+echo "=== Top in datalab (last 20) ==="; du -sh /cluster/tufts/datalab/$USER/* 2>/dev/null | sort -h | tail -n 20 || true
+echo "=== Done ==="
+'@
+        ssh $user@login.pax.tufts.edu -tt bash -lc $cmd
+        """
+        if self.persistent_var.get():
+            self._log_debug("persistent mode: copying resources commands for manual paste")
+            self.copy_resources_cmds()
+        else:
+            if os.name == "nt":
+                self._run_powershell_file(script)
+            else:
+                self._spawn_terminal(script)
+
+    def watch_gpu(self):
+        self._log_debug("watch_gpu invoked")
+        if not which("ssh"):
+            messagebox.showerror("Missing SSH", "OpenSSH client (ssh) is not on PATH")
+            return
+        user = self.user_var.get().strip()
+        node = self.node_var.get().strip()
+        if not node:
+            messagebox.showwarning("Missing node", "Enter the compute node hostname first")
+            return
+        
+        cmd = f"watch -d nvidia-smi"
+        if self.persistent_var.get():
+            self._log_debug("persistent mode: copying watch_gpu cmd")
+            self.clipboard_clear()
+            self.clipboard_append(cmd)
+            self.shell_text.insert(tk.END, f"[copy] {cmd}\n"); self.shell_text.see(tk.END)
+        else:
+            script = f"""
+$ErrorActionPreference = 'Stop'
+$user = '{user}'
+$node = '{node}'
+ssh $user@login.pax.tufts.edu -tt ssh $user@$node -tt "{cmd}"
+"""
+            if os.name == "nt":
+                self._run_powershell_file(script)
+            else:
+                self._spawn_terminal(script)
+
+    def copy_resources_cmds(self):
+        self._log_debug("copy_resources_cmds invoked")
+        cmds = (
+            "set -e\n"
+            "echo \"Node: $(hostname)  User: $USER\"\n"
+            "echo \"=== HOME ===\";    df -h /cluster/home/$USER       | sed -n '1,2p'\n"
+            "echo \"=== DATALAB ===\"; df -h /cluster/tufts/datalab    | sed -n '1,2p'\n"
+            "echo \"=== Your jobs ===\"; squeue -u $USER | sed -n '1,20p'\n"
+            "echo \"=== Partitions ===\"; sinfo -o \"%P %a %l %D %c %m %G\" | sed -n '1,20p' || true\n"
+            "echo \"=== Top in datalab (last 20) ===\"; du -sh /cluster/tufts/datalab/$USER/* 2>/dev/null | sort -h | tail -n 20 || true\n"
+            "echo \"=== GPU Status ===\"; nvidia-smi || echo 'No GPUs found'\n"
+            "echo \"=== Done ===\"\n"
+        )
+        self.clipboard_clear()
+        self.clipboard_append(cmds)
+        messagebox.showinfo("Copied", "Resource check commands copied to clipboard")
+
+    def open_login_shell(self):
+        self._log_debug("open_login_shell invoked")
+        user = self.user_var.get().strip()
+        cmd = f"ssh {user}@login.pax.tufts.edu"
+        self._spawn_terminal(cmd)
+
+    def open_alloc_shell(self):
+        self._log_debug("open_alloc_shell invoked")
+        user = self.user_var.get().strip()
+        part = self.partition_var.get().strip()
+        gres = self.gres_var.get().strip()
+        cpus = self.cpus_var.get().strip()
+        mem = self.mem_var.get().strip()
+        time = self.time_var.get().strip()
+        # Open an allocation and drop into an interactive shell on the compute node
+        cmd = f"ssh {user}@login.pax.tufts.edu -tt srun -p {part} --gres=gpu:{gres} -c {cpus} --mem={mem} -t {time} --pty bash"
+        self._spawn_terminal(cmd)
+
+    def copy_llm_setup_cmds(self):
+        self._log_debug("copy_llm_setup_cmds invoked")
+        port = int(self.port_var.get())
+        cmds = f"""
+# LLM Server Setup Commands
+echo "=== Activating conda environment ==="
+source /cluster/tufts/hpc/tools/anaconda/202307/etc/profile.d/conda.sh
+conda activate lmstudio_v3
+
+echo "=== Setting environment variables ==="
+export HF_TOKEN=hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+export PYTHONNOUSERSITE=1
+export HF_HOME=/cluster/tufts/datalab/$USER/caches/huggingface
+export TRANSFORMERS_CACHE=/cluster/tufts/datalab/$USER/caches/huggingface
+
+echo "=== Navigating to text-generation-webui ==="
+cd /cluster/tufts/datalab/$USER/text-generation-webui
+
+echo "=== Starting LLM server with 2x H100 GPUs ==="
+nohup python server.py --listen --listen-port {port} --autosplit --no_flash_attn --trust-remote-code --verbose > server.log 2>&1 < /dev/null &
+
+echo "=== Server started, checking status ==="
+sleep 3
+ps aux | grep server.py | grep -v grep
+
+echo "=== Compute node: $(hostname) ==="
+echo "=== Server process: $(pgrep -f server.py) ==="
+echo "=== Port: {port} ==="
+echo "=== To access: ssh -L {port}:$(hostname):{port} $USER@login.pax.tufts.edu ==="
+echo "=== Then open: http://localhost:{port} ==="
+
+# Keep the session alive
+tail -f server.log
+""".strip()
+        self.clipboard_clear()
+        self.clipboard_append(cmds)
+        messagebox.showinfo("Copied", "LLM setup commands copied to clipboard")
+
+    def copy_setup_cmds(self):
+        self._log_debug("copy_setup_cmds invoked")
+        port = int(self.port_var.get())
+        token = self.token_var.get().strip()
+        cmds = f"""
+# CRITICAL HPC SETUP SEQUENCE - Jupyter setup
+echo "=== On compute node: $(hostname) ==="
+
+# CRITICAL: Check we're NOT on login node
+if [[ $(hostname) == login* ]]; then
+    echo "❌❌❌ FATAL ERROR: ON LOGIN NODE ❌❌❌"
+    echo "NEVER run computational work on login nodes!"
+    echo "You will get yelled at by admins!"
+    echo ""
+    echo "Request compute node with:"
+    echo "srun -p preempt --gres=gpu:l40s:1 -c 30 --mem=40G -t 2:00:00 --pty bash"
+    exit 1
+fi
+
+echo "✅ On compute node: $(hostname)"
+
+# CRITICAL: Initialize module system first
+echo "=== Initializing module system ==="
+source /etc/profile.d/modules.sh
+
+# Load CUDA module
+echo "=== Loading CUDA 12.2 module ==="
+module load cuda/12.2
+
+# Initialize conda
+echo "=== Initializing conda ==="
+source /cluster/tufts/hpc/tools/anaconda/202307/etc/profile.d/conda.sh
+
+# Verify conda is working
+echo "=== Verifying conda initialization ==="
+which conda || {{ echo "❌ Conda not found - initialization failed"; exit 1; }}
+conda --version || {{ echo "❌ Conda version check failed"; exit 1; }}
+
+# Activate allen environment (em212class location)
+echo "=== Activating allen environment ==="
+conda activate /cluster/tufts/em212class/$USER/conda_envs/allen
+
+# Set CUDA paths for TensorFlow
+echo "=== Setting CUDA paths ==="
+export LD_LIBRARY_PATH=/usr/local/cuda-12.2/lib64:$LD_LIBRARY_PATH
+export CUDA_HOME=/usr/local/cuda-12.2
+
+# Verify environment activation
+echo "=== Verifying environment ==="
+which python || {{ echo "❌ Python not found in environment"; exit 1; }}
+python -c "import sys; print('Python:', sys.executable)" || {{ echo "❌ Python import failed"; exit 1; }}
+
+# Test TensorFlow with GPU detection (FIXED STRING ESCAPING)
+echo "=== Testing TensorFlow with GPU ==="
+python -c "
+import tensorflow as tf
+print('✅ TensorFlow version:', tf.__version__)
+print('✅ CUDA support:', tf.test.is_built_with_cuda())
+print('✅ GPU devices:', len(tf.config.list_physical_devices('GPU')))
+print('✅ GPU details:', tf.config.list_physical_devices('GPU'))
+" || {{ echo "❌ TensorFlow test failed - check module system and CUDA setup"; exit 1; }}
+
+# Navigate to NLP homework directory
+cd /cluster/tufts/em212class/$USER/NLP-Fall25
+
+echo "=== Starting Jupyter Lab ==="
+echo "=== Node: $(hostname) ==="
+echo "=== Port: {port} ==="
+echo "=== Token: {token} ==="
+echo "=== Access: http://localhost:{port}/?token={token} ==="
+
+jupyter lab --ip=0.0.0.0 --port={port} --no-browser --allow-root --NotebookApp.token='' --NotebookApp.password=''
+""".strip()
+        self.clipboard_clear()
+        self.clipboard_append(cmds)
+        messagebox.showinfo("Copied", "Jupyter setup commands copied to clipboard")
+
+    def copy_llm_auto_start_script(self):
+        self._log_debug("copy_llm_auto_start_script invoked")
+        part = self.partition_var.get().strip()
+        gres = self.gres_var.get().strip()
+        cpus = self.cpus_var.get().strip()
+        mem = self.mem_var.get().strip()
+        time = self.time_var.get().strip()
+        port = int(self.port_var.get())
+        script = f"""
+srun -p {part} --gres=gpu:{gres} -c {cpus} --mem={mem} -t {time} --pty bash <<'EOF'
+set -e
+echo "=== Activating conda environment ==="
+source /cluster/tufts/hpc/tools/anaconda/202307/etc/profile.d/conda.sh
+conda activate lmstudio_v3
+
+echo "=== Setting environment variables ==="
+export HF_TOKEN=hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+export PYTHONNOUSERSITE=1
+export HF_HOME=/cluster/tufts/datalab/$USER/caches/huggingface
+export TRANSFORMERS_CACHE=/cluster/tufts/datalab/$USER/caches/huggingface
+
+echo "=== Navigating to text-generation-webui ==="
+cd /cluster/tufts/datalab/$USER/text-generation-webui
+
+echo "=== Starting LLM server with 2x H100 GPUs ==="
+nohup python server.py --listen --listen-port {port} --autosplit --no_flash_attn --trust-remote-code --verbose > server.log 2>&1 < /dev/null &
+
+echo "=== Server started, checking status ==="
+sleep 3
+ps aux | grep server.py | grep -v grep
+
+echo "=== Compute node: $(hostname) ==="
+echo "=== Server process: $(pgrep -f server.py) ==="
+echo "=== Port: {port} ==="
+echo "=== To access: ssh -L {port}:$(hostname):{port} $USER@login.pax.tufts.edu ==="
+echo "=== Then open: http://localhost:{port} ==="
+
+# Keep the session alive
+tail -f server.log
+EOF
+""".strip()
+        self.clipboard_clear()
+        self.clipboard_append(script)
+        messagebox.showinfo("Copied", "LLM auto start script copied to clipboard")
+
+    def copy_auto_start_script(self):
+        self._log_debug("copy_auto_start_script invoked")
+        part = self.partition_var.get().strip()
+        gres = self.gres_var.get().strip()
+        cpus = self.cpus_var.get().strip()
+        mem = self.mem_var.get().strip()
+        time = self.time_var.get().strip()
+        port = int(self.port_var.get())
+        token = self.token_var.get().strip()
+        script = f"""
+# JUPYTER SETUP SCRIPT - Run this on compute node
+echo "=== JUPYTER SETUP SCRIPT ==="
+echo "⚠️  WARNING: You must be on a compute node first!"
+echo "Run: srun -p {part} --gres=gpu:{gres} -c {cpus} --mem={mem} -t {time} --pty bash"
+echo ""
+
+# CRITICAL: Check we're NOT on login node
+if [[ $(hostname) == login* ]]; then
+    echo "❌❌❌ FATAL ERROR: ON LOGIN NODE ❌❌❌"
+    echo "NEVER run computational work on login nodes!"
+    echo "You will get yelled at by admins!"
+    echo ""
+    echo "Request compute node with:"
+    echo "srun -p {part} --gres=gpu:{gres} -c {cpus} --mem={mem} -t {time} --pty bash"
+    exit 1
+fi
+
+echo "✅ On compute node: $(hostname)"
+
+# CRITICAL: Initialize module system first
+echo "=== Initializing module system ==="
+source /etc/profile.d/modules.sh
+
+# Load CUDA module
+echo "=== Loading CUDA 12.2 module ==="
+module load cuda/12.2
+
+# Initialize conda
+echo "=== Initializing conda ==="
+source /cluster/tufts/hpc/tools/anaconda/202307/etc/profile.d/conda.sh
+
+# Verify conda is working
+echo "=== Verifying conda initialization ==="
+which conda || {{ echo "❌ Conda not found - initialization failed"; exit 1; }}
+conda --version || {{ echo "❌ Conda version check failed"; exit 1; }}
+
+# Activate allen environment (em212class location)
+echo "=== Activating allen environment ==="
+conda activate /cluster/tufts/em212class/$USER/conda_envs/allen
+
+# Set CUDA paths for TensorFlow
+echo "=== Setting CUDA paths ==="
+export LD_LIBRARY_PATH=/usr/local/cuda-12.2/lib64:$LD_LIBRARY_PATH
+export CUDA_HOME=/usr/local/cuda-12.2
+
+# Verify environment activation
+echo "=== Verifying environment ==="
+which python || {{ echo "❌ Python not found in environment"; exit 1; }}
+python -c "import sys; print('Python:', sys.executable)" || {{ echo "❌ Python import failed"; exit 1; }}
+
+# Test TensorFlow with GPU detection (FIXED STRING ESCAPING)
+echo "=== Testing TensorFlow with GPU ==="
+python -c "
+import tensorflow as tf
+print('✅ TensorFlow version:', tf.__version__)
+print('✅ CUDA support:', tf.test.is_built_with_cuda())
+print('✅ GPU devices:', len(tf.config.list_physical_devices('GPU')))
+print('✅ GPU details:', tf.config.list_physical_devices('GPU'))
+" || {{ echo "❌ TensorFlow test failed - check module system and CUDA setup"; exit 1; }}
+
+# Navigate to NLP homework directory
+cd /cluster/tufts/em212class/$USER/NLP-Fall25
+
+echo "=== Starting Jupyter Lab ==="
+echo "=== Node: $(hostname) ==="
+echo "=== Port: {port} ==="
+echo "=== Token: {token} ==="
+echo "=== Access: http://localhost:{port}/?token={token} ==="
+
+jupyter lab --ip=0.0.0.0 --port={port} --no-browser --allow-root --NotebookApp.token='' --NotebookApp.password=''
+""".strip()
+        self.clipboard_clear()
+        self.clipboard_append(script)
+        messagebox.showinfo("Copied", "Auto start script copied to clipboard")
+
+    def copy_login_cmd(self):
+        self._log_debug("copy_login_cmd invoked")
+        user = self.user_var.get().strip()
+        cmd = f"ssh {user}@login.pax.tufts.edu"
+        self.clipboard_clear()
+        self.clipboard_append(cmd)
+        messagebox.showinfo("Copied", "Login SSH command copied to clipboard")
+
+    def copy_alloc_cmd(self):
+        self._log_debug("copy_alloc_cmd invoked")
+        part = self.partition_var.get().strip()
+        gres = self.gres_var.get().strip()
+        cpus = self.cpus_var.get().strip()
+        mem = self.mem_var.get().strip()
+        time = self.time_var.get().strip()
+        cmd = f"srun -p {part} --gres=gpu:{gres} -c {cpus} --mem={mem} -t {time} --pty bash"
+        self.clipboard_clear()
+        self.clipboard_append(cmd)
+        messagebox.showinfo("Copied", "Allocation srun command copied to clipboard")
+
+    def test_tensorflow(self):
+        self._log_debug("test_tensorflow invoked")
+        if not which("ssh"):
+            messagebox.showerror("Missing SSH", "OpenSSH client (ssh) is not on PATH")
+            return
+        user = self.user_var.get().strip()
+        node = self.node_var.get().strip()
+        if not node:
+            messagebox.showwarning("Missing node", "Enter the compute node hostname first")
+            return
+        
+        cmd = """
+# TENSORFLOW TEST SCRIPT - Run this on compute node
+echo "=== TENSORFLOW TEST SCRIPT ==="
+echo "⚠️  WARNING: You must be on a compute node first!"
+echo ""
+
+# CRITICAL: Check we're NOT on login node
+if [[ $(hostname) == login* ]]; then
+    echo "❌❌❌ FATAL ERROR: ON LOGIN NODE ❌❌❌"
+    echo "NEVER run computational work on login nodes!"
+    echo "You will get yelled at by admins!"
+    echo ""
+    echo "Request compute node with:"
+    echo "srun -p preempt --gres=gpu:l40s:1 -c 30 --mem=40G -t 2:00:00 --pty bash"
+    exit 1
+fi
+
+echo "✅ On compute node: $(hostname)"
+
+# CRITICAL: Initialize module system first
+echo "=== Initializing module system ==="
+source /etc/profile.d/modules.sh
+
+# Load CUDA module
+echo "=== Loading CUDA 12.2 module ==="
+module load cuda/12.2
+
+# Initialize conda
+echo "=== Initializing conda ==="
+source /cluster/tufts/hpc/tools/anaconda/202307/etc/profile.d/conda.sh
+
+# Verify conda
+echo "=== Conda Status ==="
+which conda && conda --version || echo "❌ Conda not found"
+
+# Activate environment
+echo "=== Activating allen environment ==="
+conda activate /cluster/tufts/em212class/$USER/conda_envs/allen
+
+# Set CUDA paths for TensorFlow
+echo "=== Setting CUDA paths ==="
+export LD_LIBRARY_PATH=/usr/local/cuda-12.2/lib64:$LD_LIBRARY_PATH
+export CUDA_HOME=/usr/local/cuda-12.2
+
+# Test Python
+echo "=== Python Status ==="
+which python && python --version || echo "❌ Python not found"
+
+# Test TensorFlow with GPU detection (FIXED STRING ESCAPING)
+echo "=== TensorFlow Test with GPU ==="
+python -c "
+import tensorflow as tf
+print('✅ TensorFlow version:', tf.__version__)
+print('✅ CUDA support:', tf.test.is_built_with_cuda())
+print('✅ GPU devices:', len(tf.config.list_physical_devices('GPU')))
+print('✅ GPU details:', tf.config.list_physical_devices('GPU'))
+    
+# Test basic computation
+print('=== Basic Computation Test ===')
+a = tf.constant([1.0, 2.0, 3.0])
+b = tf.constant([4.0, 5.0, 6.0])
+c = tf.add(a, b)
+print('✅ Computation result:', c.numpy())
+print('✅ Device:', c.device)
+"
+"""
+        
+        if self.persistent_var.get():
+            self._log_debug("persistent mode: copying tf test cmd")
+            self.clipboard_clear()
+            self.clipboard_append(cmd)
+            self.shell_text.insert(tk.END, f"[copy] {cmd}\n"); self.shell_text.see(tk.END)
+        else:
+            script = f"""
+$ErrorActionPreference = 'Stop'
+$user = '{user}'
+$node = '{node}'
+ssh $user@login.pax.tufts.edu -tt ssh $user@$node -tt "{cmd}"
+"""
+            if os.name == "nt":
+                self._run_powershell_file(script)
+            else:
+                self._spawn_terminal(script)
+
+    def copy_tf_test_cmd(self):
+        self._log_debug("copy_tf_test_cmd invoked")
+        cmd = """
+# TENSORFLOW TEST SCRIPT - Run this on compute node
+echo "=== TENSORFLOW TEST SCRIPT ==="
+echo "⚠️  WARNING: You must be on a compute node first!"
+echo ""
+
+# CRITICAL: Check we're NOT on login node
+if [[ $(hostname) == login* ]]; then
+    echo "❌❌❌ FATAL ERROR: ON LOGIN NODE ❌❌❌"
+    echo "NEVER run computational work on login nodes!"
+    echo "You will get yelled at by admins!"
+    echo ""
+    echo "Request compute node with:"
+    echo "srun -p preempt --gres=gpu:l40s:1 -c 30 --mem=40G -t 2:00:00 --pty bash"
+    exit 1
+fi
+
+echo "✅ On compute node: $(hostname)"
+
+# CRITICAL: Initialize module system first
+echo "=== Initializing module system ==="
+source /etc/profile.d/modules.sh
+
+# Load CUDA module
+echo "=== Loading CUDA 12.2 module ==="
+module load cuda/12.2
+
+# Initialize conda
+echo "=== Initializing conda ==="
+source /cluster/tufts/hpc/tools/anaconda/202307/etc/profile.d/conda.sh
+
+# Verify conda
+echo "=== Conda Status ==="
+which conda && conda --version || echo "❌ Conda not found"
+
+# Activate environment
+echo "=== Activating allen environment ==="
+conda activate /cluster/tufts/em212class/$USER/conda_envs/allen
+
+# Set CUDA paths for TensorFlow
+echo "=== Setting CUDA paths ==="
+export LD_LIBRARY_PATH=/usr/local/cuda-12.2/lib64:$LD_LIBRARY_PATH
+export CUDA_HOME=/usr/local/cuda-12.2
+
+# Test Python
+echo "=== Python Status ==="
+which python && python --version || echo "❌ Python not found"
+
+# Test TensorFlow with GPU detection (FIXED STRING ESCAPING)
+echo "=== TensorFlow Test with GPU ==="
+python -c "
+import tensorflow as tf
+print('✅ TensorFlow version:', tf.__version__)
+print('✅ CUDA support:', tf.test.is_built_with_cuda())
+print('✅ GPU devices:', len(tf.config.list_physical_devices('GPU')))
+print('✅ GPU details:', tf.config.list_physical_devices('GPU'))
+    
+# Test basic computation
+print('=== Basic Computation Test ===')
+a = tf.constant([1.0, 2.0, 3.0])
+b = tf.constant([4.0, 5.0, 6.0])
+c = tf.add(a, b)
+print('✅ Computation result:', c.numpy())
+print('✅ Device:', c.device)
+"
+"""
+        self.clipboard_clear()
+        self.clipboard_append(cmd)
+        messagebox.showinfo("Copied", "TensorFlow test commands copied to clipboard")
+
+    def start_comfyui(self):
+        self._log_debug("start_comfyui invoked")
+        if not which("ssh"):
+            messagebox.showerror("Missing SSH", "OpenSSH client (ssh) is not on PATH")
+            return
+        user = self.user_var.get().strip()
+        part = self.partition_var.get().strip()
+        gres = self.gres_var.get().strip()
+        cpus = self.cpus_var.get().strip()
+        mem = self.mem_var.get().strip()
+        time = self.time_var.get().strip()
+        port = int(self.port_var.get())
+
+        # ComfyUI setup script
+        script = f"""
+        $ErrorActionPreference = 'Stop'
+        $user = '{user}'
+        $port = {port}
+        ssh $user@login.pax.tufts.edu -tt @'
+          set -e
+          echo "Requesting GPU allocation for ComfyUI video generation..."
+          srun -p {part} --gres=gpu:{gres} -c {cpus} --mem={mem} -t {time} --pty bash <<'EOF'
+            set -e
+            echo "=== CRITICAL: Initialize module system FIRST ==="
+            source /etc/profile.d/modules.sh
+            
+            echo "=== Loading CUDA module BEFORE conda ==="
+            module load cuda/12.2
+            
+            echo "=== Loading GCC module for compatibility ==="
+            module load gcc/9.3.0
+            
+            echo "=== Checking CUDA version ==="
+            nvcc --version
+            
+            echo "=== Initializing conda ==="
+            source /cluster/tufts/hpc/tools/anaconda/202307/etc/profile.d/conda.sh
+            
+            echo "=== Activating video_gen conda environment ==="
+            conda activate /cluster/tufts/em212class/$USER/conda_envs/video_gen
+            
+            echo "=== Setting environment variables ==="
+            export HF_HOME="/cluster/tufts/em212class/$USER/caches/huggingface"
+            export TRANSFORMERS_CACHE="/cluster/tufts/em212class/$USER/caches/huggingface"
+            export TORCH_HOME="/cluster/tufts/em212class/$USER/caches/torch"
+            export TMPDIR="/cluster/tufts/em212class/$USER/tmp"
+            
+            echo "=== Testing setup ==="
+            python -c "import torch; print(f'✅ PyTorch: {{torch.__version__}}')"
+            python -c "import torch; print(f'✅ CUDA available: {{torch.cuda.is_available()}}')"
+            
+            echo "=== Navigating to ComfyUI directory ==="
+            cd /cluster/tufts/em212class/$USER/ComfyUI
+            
+            echo "=== Starting ComfyUI with memory optimization ==="
+            echo "=== Node: $(hostname) ==="
+            echo "=== Port: $port ==="
+            echo ""
+            echo "🌐 TO ACCESS COMFYUI FROM YOUR LOCAL MACHINE:"
+            echo "Run this SSH command in a NEW terminal window:"
+            echo "ssh -L $port:$(hostname):$port $user@login.pax.tufts.edu"
+            echo ""
+            echo "Then open in your browser:"
+            echo "http://localhost:$port"
+            echo ""
+            
+            python main.py --listen 0.0.0.0 --port $port --cpu-vae --lowvram
+          EOF
+        '@
+        """
+
+        if self.persistent_var.get():
+            self._log_debug("persistent mode: copying ComfyUI auto start script")
+            self.copy_comfyui_auto_start_script()
+        else:
+            if os.name == "nt":
+                self._run_powershell_file(script)
+            else:
+                self._spawn_terminal(script)
+
+    def copy_comfyui_setup(self):
+        self._log_debug("copy_comfyui_setup invoked")
+        port = int(self.port_var.get())
+        cmds = f"""
+# COMFYUI VIDEO GENERATION SETUP - Run this on compute node
+echo "=== COMFYUI VIDEO GENERATION SETUP ==="
+echo "⚠️  WARNING: You must be on a compute node first!"
+echo ""
+
+# CRITICAL: Check we're NOT on login node
+if [[ $(hostname) == login* ]]; then
+    echo "❌❌❌ FATAL ERROR: ON LOGIN NODE ❌❌❌"
+    echo "NEVER run computational work on login nodes!"
+    echo "You will get yelled at by admins!"
+    echo ""
+    echo "Request compute node with:"
+    echo "srun -p preempt --gres=gpu:l40s:1 -c 30 --mem=64G -t 4:00:00 --pty bash"
+    exit 1
+fi
+
+echo "✅ On compute node: $(hostname)"
+
+# CRITICAL: Initialize module system FIRST
+echo "=== Initializing module system ==="
+source /etc/profile.d/modules.sh
+
+# Load CUDA module BEFORE conda
+echo "=== Loading CUDA 12.2 module ==="
+module load cuda/12.2
+
+# Load GCC module for compatibility
+echo "=== Loading GCC module ==="
+module load gcc/9.3.0
+
+# Check CUDA version
+echo "=== Checking CUDA version ==="
+nvcc --version
+
+# Initialize conda
+echo "=== Initializing conda ==="
+source /cluster/tufts/hpc/tools/anaconda/202307/etc/profile.d/conda.sh
+
+# Activate video_gen environment
+echo "=== Activating video_gen environment ==="
+conda activate /cluster/tufts/em212class/$USER/conda_envs/video_gen
+
+# Set environment variables
+echo "=== Setting environment variables ==="
+export HF_HOME="/cluster/tufts/em212class/$USER/caches/huggingface"
+export TRANSFORMERS_CACHE="/cluster/tufts/em212class/$USER/caches/huggingface"
+export TORCH_HOME="/cluster/tufts/em212class/$USER/caches/torch"
+export TMPDIR="/cluster/tufts/em212class/$USER/tmp"
+
+# Test the setup
+echo "=== Testing setup ==="
+python -c "import torch; print(f'✅ PyTorch: {{torch.__version__}}')"
+python -c "import torch; print(f'✅ CUDA available: {{torch.cuda.is_available()}}')"
+python -c "import sentencepiece; print('✅ sentencepiece works')"
+
+# Navigate to ComfyUI directory
+cd /cluster/tufts/em212class/$USER/ComfyUI
+
+echo "=== Starting ComfyUI with memory optimization ==="
+echo "=== Node: $(hostname) ==="
+echo "=== Port: {port} ==="
+echo ""
+echo "🌐 TO ACCESS COMFYUI FROM YOUR LOCAL MACHINE:"
+echo "Run this SSH command in a NEW terminal window:"
+echo "ssh -L {port}:$(hostname):{port} $USER@login.pax.tufts.edu"
+echo ""
+echo "Then open in your browser:"
+echo "http://localhost:{port}"
+echo ""
+
+python main.py --listen 0.0.0.0 --port {port} --cpu-vae --lowvram
+""".strip()
+        self.clipboard_clear()
+        self.clipboard_append(cmds)
+        messagebox.showinfo("Copied", "ComfyUI setup commands copied to clipboard")
+
+    def copy_comfyui_auto_start_script(self):
+        self._log_debug("copy_comfyui_auto_start_script invoked")
+        part = self.partition_var.get().strip()
+        gres = self.gres_var.get().strip()
+        cpus = self.cpus_var.get().strip()
+        mem = self.mem_var.get().strip()
+        time = self.time_var.get().strip()
+        port = int(self.port_var.get())
+        script = f"""
+srun -p {part} --gres=gpu:{gres} -c {cpus} --mem={mem} -t {time} --pty bash <<'EOF'
+set -e
+echo "=== CRITICAL: Initialize module system FIRST ==="
+source /etc/profile.d/modules.sh
+
+echo "=== Loading CUDA module BEFORE conda ==="
+module load cuda/12.2
+
+echo "=== Loading GCC module for compatibility ==="
+module load gcc/9.3.0
+
+echo "=== Checking CUDA version ==="
+nvcc --version
+
+echo "=== Initializing conda ==="
+source /cluster/tufts/hpc/tools/anaconda/202307/etc/profile.d/conda.sh
+
+echo "=== Activating video_gen conda environment ==="
+conda activate /cluster/tufts/em212class/$USER/conda_envs/video_gen
+
+echo "=== Setting environment variables ==="
+export HF_HOME="/cluster/tufts/em212class/$USER/caches/huggingface"
+export TRANSFORMERS_CACHE="/cluster/tufts/em212class/$USER/caches/huggingface"
+export TORCH_HOME="/cluster/tufts/em212class/$USER/caches/torch"
+export TMPDIR="/cluster/tufts/em212class/$USER/tmp"
+
+echo "=== Testing setup ==="
+python -c "import torch; print(f'✅ PyTorch: {{torch.__version__}}')"
+python -c "import torch; print(f'✅ CUDA available: {{torch.cuda.is_available()}}')"
+
+echo "=== Navigating to ComfyUI directory ==="
+cd /cluster/tufts/em212class/$USER/ComfyUI
+
+echo "=== Starting ComfyUI with memory optimization ==="
+echo "=== Node: $(hostname) ==="
+echo "=== Port: {port} ==="
+echo ""
+echo "🌐 TO ACCESS COMFYUI FROM YOUR LOCAL MACHINE:"
+echo "Run this SSH command in a NEW terminal window:"
+echo "ssh -L {port}:$(hostname):{port} $USER@login.pax.tufts.edu"
+echo ""
+echo "Then open in your browser:"
+echo "http://localhost:{port}"
+echo ""
+
+python main.py --listen 0.0.0.0 --port {port} --cpu-vae --lowvram
+EOF
+""".strip()
+        self.clipboard_clear()
+        self.clipboard_append(script)
+        messagebox.showinfo("Copied", "ComfyUI auto start script copied to clipboard")
+
+    def install_model(self):
+        self._log_debug("install_model invoked")
+        # Use a simple input dialog instead of creating a new window
+        model_repo = tk.simpledialog.askstring("Install ComfyUI Model", 
+            "Enter model repository/URL (e.g., 'runwayml/stable-diffusion-v1-5' or 'https://example.com/model.safetensors'):")
+        
+        if not model_repo:
+            return
+            
+        # Detect installation method based on input
+        if model_repo.startswith('http'):
+            method = "manual"
+            model_type = "checkpoint"  # Default for manual downloads
+        elif '/' in model_repo and not model_repo.startswith('http'):
+            method = "huggingface"
+            model_type = "checkpoint"  # Default for HF repos
+        else:
+            method = "git"
+            model_type = "checkpoint"
+            
+        # Ask for model type
+        model_type = tk.simpledialog.askstring("Model Type", 
+            "Enter model type (checkpoint/lora/vae/text_encoder/controlnet) [default: checkpoint]:") or "checkpoint"
+            
+        # Ask for filename if needed
+        filename = ""
+        if method in ["huggingface", "manual"]:
+            filename = tk.simpledialog.askstring("Filename", 
+                "Enter specific filename (optional, leave empty for entire repo):") or ""
+        
+        # Generate and copy the script
+        if method == "huggingface":
+            script = self._generate_hf_install_script(model_type, model_repo, filename)
+        elif method == "git":
+            script = self._generate_git_install_script(model_type, model_repo)
+        else:  # manual
+            script = self._generate_manual_install_script(model_type, model_repo, filename)
+        
+        self.clipboard_clear()
+        self.clipboard_append(script)
+        messagebox.showinfo("Copied", f"Model installation script copied to clipboard!\n\nMethod: {method}\nType: {model_type}\n\nRun this on your compute node.")
+
+    def _generate_hf_install_script(self, model_type, repo, filename):
+        model_dir = {
+            "checkpoint": "diffusion_models",
+            "lora": "loras", 
+            "vae": "vae",
+            "text_encoder": "text_encoders",
+            "controlnet": "controlnet"
+        }[model_type]
+        
+        if filename:
+            return f"""
+# Install {model_type} model from Hugging Face
+cd /cluster/tufts/em212class/$USER/ComfyUI/models/{model_dir}
+
+# Download specific file
+python -c "
+from huggingface_hub import hf_hub_download
+hf_hub_download(repo_id='{repo}', filename='{filename}', local_dir='.')
+print('✅ Downloaded {filename}')
+"
+
+# Verify download
+ls -la {filename}
+"""
+        else:
+            return f"""
+# Install {model_type} model from Hugging Face
+cd /cluster/tufts/em212class/$USER/ComfyUI/models/{model_dir}
+
+# Download entire repository
+python -c "
+from huggingface_hub import snapshot_download
+snapshot_download(repo_id='{repo}', local_dir='.')
+print('✅ Downloaded {repo}')
+"
+
+# List downloaded files
+ls -la
+"""
+
+    def _generate_git_install_script(self, model_type, repo):
+        if model_type == "checkpoint":
+            return f"""
+# Install custom node or model via Git
+cd /cluster/tufts/em212class/$USER/ComfyUI/custom_nodes
+
+# Clone the repository
+git clone {repo}
+
+# Install any requirements
+cd $(basename {repo} .git)
+if [ -f requirements.txt ]; then
+    pip install -r requirements.txt
+fi
+
+echo "✅ Installed custom node from {repo}"
+"""
+        else:
+            return f"""
+# Download model via Git
+cd /cluster/tufts/em212class/$USER/ComfyUI/models/{model_type}s
+
+# Clone the repository
+git clone {repo}
+
+echo "✅ Downloaded model from {repo}"
+"""
+
+    def _generate_manual_install_script(self, model_type, url, filename):
+        model_dir = {
+            "checkpoint": "diffusion_models",
+            "lora": "loras",
+            "vae": "vae", 
+            "text_encoder": "text_encoders",
+            "controlnet": "controlnet"
+        }[model_type]
+        
+        return f"""
+# Manual model installation
+cd /cluster/tufts/em212class/$USER/ComfyUI/models/{model_dir}
+
+# Download the model file
+wget -O {filename or 'model.safetensors'} "{url}"
+
+# Verify download
+ls -la {filename or 'model.safetensors'}
+
+echo "✅ Downloaded model to {model_dir}/"
+echo "📁 Model location: /cluster/tufts/em212class/$USER/ComfyUI/models/{model_dir}/"
+"""
+
+    def copy_model_install(self):
+        self._log_debug("copy_model_install invoked")
+        cmds = """
+# COMFYUI MODEL INSTALLATION HELPER
+echo "=== COMFYUI MODEL INSTALLATION ==="
+echo "⚠️  WARNING: You must be on a compute node first!"
+echo ""
+
+# Check we're on compute node
+if [[ $(hostname) == login* ]]; then
+    echo "❌❌❌ FATAL ERROR: ON LOGIN NODE ❌❌❌"
+    echo "Request compute node with:"
+    echo "srun -p preempt --gres=gpu:l40s:1 -c 30 --mem=64G -t 4:00:00 --pty bash"
+    exit 1
+fi
+
+echo "✅ On compute node: $(hostname)"
+
+# Initialize environment
+source /etc/profile.d/modules.sh
+module load cuda/12.2
+module load gcc/9.3.0
+source /cluster/tufts/hpc/tools/anaconda/202307/etc/profile.d/conda.sh
+conda activate /cluster/tufts/em212class/$USER/conda_envs/video_gen
+
+# Navigate to ComfyUI
+cd /cluster/tufts/em212class/$USER/ComfyUI
+
+echo ""
+echo "📁 MODEL DIRECTORIES:"
+echo "Checkpoints: models/diffusion_models/"
+echo "LoRAs: models/loras/"
+echo "VAEs: models/vae/"
+echo "Text Encoders: models/text_encoders/"
+echo "ControlNets: models/controlnet/"
+echo ""
+
+echo "🔧 INSTALLATION METHODS:"
+echo "1. Hugging Face Hub:"
+echo "   python -c \"from huggingface_hub import hf_hub_download; hf_hub_download(repo_id='repo/name', filename='model.safetensors', local_dir='.')\""
+echo ""
+echo "2. Git Clone (for custom nodes):"
+echo "   git clone https://github.com/user/custom-node.git custom_nodes/custom-node"
+echo ""
+echo "3. Manual Download:"
+echo "   wget -O model.safetensors 'https://example.com/model.safetensors'"
+echo ""
+echo "4. ComfyUI Manager (in browser):"
+echo "   Click 'Install Models' in ComfyUI interface"
+echo ""
+
+echo "✅ Ready for model installation!"
+""".strip()
+        self.clipboard_clear()
+        self.clipboard_append(cmds)
+        messagebox.showinfo("Copied", "Model installation helper commands copied to clipboard")
+
+    def start_persistent_env(self):
+        self._log_debug("start_persistent_env invoked")
+        if not which("ssh"):
+            messagebox.showerror("Missing SSH", "OpenSSH client (ssh) is not on PATH")
+            return
+        user = self.user_var.get().strip()
+        part = self.partition_var.get().strip()
+        gres = self.gres_var.get().strip()
+        cpus = self.cpus_var.get().strip()
+        mem = self.mem_var.get().strip()
+        time = self.time_var.get().strip()
+
+        # Persistent environment script
+        script = f"""
+        $ErrorActionPreference = 'Stop'
+        $user = '{user}'
+        ssh $user@login.pax.tufts.edu -tt @'
+          set -e
+          echo "Starting persistent conda environment with screen..."
+          srun -p {part} --gres=gpu:{gres} -c {cpus} --mem={mem} -t {time} --pty bash <<'EOF'
+            set -e
+            
+            # Initialize environment
+            echo "=== Initializing persistent environment ==="
+            source /etc/profile.d/modules.sh
+            module load cuda/12.2
+            module load gcc/9.3.0
+            source /cluster/tufts/hpc/tools/anaconda/202307/etc/profile.d/conda.sh
+            conda activate /cluster/tufts/em212class/$USER/conda_envs/video_gen
+            
+            # Set environment variables
+            export HF_HOME="/cluster/tufts/em212class/$USER/caches/huggingface"
+            export TRANSFORMERS_CACHE="/cluster/tufts/em212class/$USER/caches/huggingface"
+            export TORCH_HOME="/cluster/tufts/em212class/$USER/caches/torch"
+            export TMPDIR="/cluster/tufts/em212class/$USER/tmp"
+            
+            # Navigate to ComfyUI
+            cd /cluster/tufts/em212class/$USER/ComfyUI
+            
+            echo "=== Starting persistent screen session ==="
+            echo "Session name: comfyui_persistent"
+            echo "Node: $(hostname)"
+            echo ""
+            echo "🌐 TO ACCESS THIS SESSION:"
+            echo "1. SSH to login: ssh $user@login.pax.tufts.edu"
+            echo "2. SSH to node: ssh $user@$(hostname)"
+            echo "3. Attach screen: screen -r comfyui_persistent"
+            echo ""
+            echo "🔧 AVAILABLE COMMANDS:"
+            echo "- Install models: python -c \"from huggingface_hub import snapshot_download; snapshot_download(repo_id='Comfy-Org/Wan_2.2_ComfyUI_Repackaged', local_dir='.')\""
+            echo "- Start ComfyUI: python main.py --listen 0.0.0.0 --port 8188 --cpu-vae --lowvram"
+            echo "- Check GPU: nvidia-smi"
+            echo "- Check models: ls -la models/"
+            echo ""
+            echo "✅ Environment ready! Detach with Ctrl+A, D"
+            
+            # Start screen session
+            screen -S comfyui_persistent
+          EOF
+        '@
+        """
+
+        if self.persistent_var.get():
+            self._log_debug("persistent mode: copying persistent env script")
+            self.copy_persistent_env()
+        else:
+            if os.name == "nt":
+                self._run_powershell_file(script)
+            else:
+                self._spawn_terminal(script)
+
+    def copy_persistent_env(self):
+        self._log_debug("copy_persistent_env invoked")
+        part = self.partition_var.get().strip()
+        gres = self.gres_var.get().strip()
+        cpus = self.cpus_var.get().strip()
+        mem = self.mem_var.get().strip()
+        time = self.time_var.get().strip()
+        script = f"""
+# PERSISTENT CONDA ENVIRONMENT WITH SCREEN
+echo "=== Starting persistent conda environment ==="
+echo "⚠️  WARNING: You must be on a compute node first!"
+echo ""
+
+# Check we're on compute node
+if [[ $(hostname) == login* ]]; then
+    echo "❌❌❌ FATAL ERROR: ON LOGIN NODE ❌❌❌"
+    echo "Request compute node with:"
+    echo "srun -p {part} --gres=gpu:{gres} -c {cpus} --mem={mem} -t {time} --pty bash"
+    exit 1
+fi
+
+echo "✅ On compute node: $(hostname)"
+
+# Initialize environment
+echo "=== Initializing persistent environment ==="
+source /etc/profile.d/modules.sh
+module load cuda/12.2
+module load gcc/9.3.0
+source /cluster/tufts/hpc/tools/anaconda/202307/etc/profile.d/conda.sh
+conda activate /cluster/tufts/em212class/$USER/conda_envs/video_gen
+
+# Set environment variables
+export HF_HOME="/cluster/tufts/em212class/$USER/caches/huggingface"
+export TRANSFORMERS_CACHE="/cluster/tufts/em212class/$USER/caches/huggingface"
+export TORCH_HOME="/cluster/tufts/em212class/$USER/caches/torch"
+export TMPDIR="/cluster/tufts/em212class/$USER/tmp"
+
+# Navigate to ComfyUI
+cd /cluster/tufts/em212class/$USER/ComfyUI
+
+echo "=== Starting persistent screen session ==="
+echo "Session name: comfyui_persistent"
+echo "Node: $(hostname)"
+echo ""
+echo "🌐 TO ACCESS THIS SESSION:"
+echo "1. SSH to login: ssh $USER@login.pax.tufts.edu"
+echo "2. SSH to node: ssh $USER@$(hostname)"
+echo "3. Attach screen: screen -r comfyui_persistent"
+echo ""
+echo "🔧 AVAILABLE COMMANDS:"
+echo "- Install Wan 2.2: python -c \"from huggingface_hub import snapshot_download; snapshot_download(repo_id='Comfy-Org/Wan_2.2_ComfyUI_Repackaged', local_dir='.')\""
+echo "- Start ComfyUI: python main.py --listen 0.0.0.0 --port 8188 --cpu-vae --lowvram"
+echo "- Check GPU: nvidia-smi"
+echo "- Check models: ls -la models/"
+echo "- Monitor progress: watch -n 5 'du -sh models/*'"
+echo ""
+echo "✅ Environment ready! Detach with Ctrl+A, D"
+
+# Start screen session
+screen -S comfyui_persistent
+""".strip()
+        self.clipboard_clear()
+        self.clipboard_append(script)
+        messagebox.showinfo("Copied", "Persistent environment script copied to clipboard")
+
+
+    # ---- helpers ----
+    def _powershell(self) -> str:
+        return os.path.join(os.environ.get("SystemRoot", r"C:\\Windows"), "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
+
+    def _cmd_exe(self) -> str:
+        return os.path.join(os.environ.get("SystemRoot", r"C:\\Windows"), "System32", "cmd.exe")
+
+    def _spawn_terminal(self, command: str):
+        """Open a new terminal window with command, fallback to running locally if terminal unavailable."""
+        self._log_debug(f"spawn_terminal: {command}")
+        try:
+            if os.name == "nt":
+                # For complex multi-line commands, prefer writing a temp PowerShell script
+                if "\n" in command or "@'" in command or "'@" in command:
+                    self._run_powershell_file(command)
+                else:
+                    if which("wt"):
+                        subprocess.Popen(["wt", "-w", "0", "nt", "powershell", "-NoExit", "-Command", command])
+                    else:
+                        subprocess.Popen([self._cmd_exe(), "/c", "start", "", self._cmd_exe(), "/k", command])
+            else:
+                # Try common terminals on *nix
+                if which("xterm"):
+                    subprocess.Popen(["xterm", "-hold", "-e", "bash", "-lc", command])
+                elif which("gnome-terminal"):
+                    subprocess.Popen(["gnome-terminal", "--", "bash", "-lc", command])
+                else:
+                    subprocess.Popen(["bash", "-lc", command])
+        except Exception as e:
+            self._log_debug(f"terminal spawn failed: {e}; running locally")
+            self._run_local_async(command)
+
+    def _run_powershell_file(self, script_content: str):
+        try:
+            import tempfile
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".ps1", mode="w", encoding="utf-8") as f:
+                f.write(script_content)
+                path = f.name
+            # Use -ExecutionPolicy Bypass to avoid local policy blocks (does not persist)
+            subprocess.Popen([self._powershell(), "-NoExit", "-ExecutionPolicy", "Bypass", "-File", path])
+            self._log_debug(f"spawned ps1: {path}")
+        except Exception as e:
+            self._log_debug(f"ps1 spawn failed: {e}; running locally")
+            self._run_local_async(script_content)
+
+    # Job control helpers
+    def list_jobs(self):
+        self._log_debug("list_jobs invoked")
+        if not which("ssh"):
+            messagebox.showerror("Missing SSH", "OpenSSH client (ssh) is not on PATH")
+            return
+        user = self.user_var.get().strip()
+        cmd = "squeue -u $USER | sed -n '1,50p'"
+        if self.persistent_var.get():
+            self._log_debug("persistent mode: copying list_jobs cmd")
+            self.clipboard_clear()
+            self.clipboard_append(cmd)
+            self.shell_text.insert(tk.END, f"[copy] {cmd}\n"); self.shell_text.see(tk.END)
+        else:
+            script = f"""
+$ErrorActionPreference = 'Stop'
+$user = '{user}'
+ssh $user@login.pax.tufts.edu -tt bash -lc "{cmd}"
+"""
+            if os.name == "nt":
+                self._run_powershell_file(script)
+            else:
+                self._spawn_terminal(script)
+
+    def cancel_jobs(self):
+        self._log_debug("cancel_jobs invoked")
+        if not which("ssh"):
+            messagebox.showerror("Missing SSH", "OpenSSH client (ssh) is not on PATH")
+            return
+        user = self.user_var.get().strip()
+        jobs_raw = self.jobs_entry.get().strip() if hasattr(self, 'jobs_entry') else ''
+        if not jobs_raw:
+            messagebox.showwarning("Jobs", "Enter one or more Job IDs")
+            return
+        jobs = ' '.join([j for j in jobs_raw.replace(',', ' ').split() if j.isdigit()])
+        if not jobs:
+            messagebox.showwarning("Jobs", "No valid numeric Job IDs found")
+            return
+        cmd = f"echo Cancelling: {jobs}; scancel {jobs}; squeue -u $USER | sed -n '1,30p'"
+        if self.persistent_var.get():
+            self._log_debug("persistent mode: copying cancel_jobs cmd")
+            self.clipboard_clear()
+            self.clipboard_append(cmd)
+            self.shell_text.insert(tk.END, f"[copy] {cmd}\n"); self.shell_text.see(tk.END)
+        else:
+            script = f"""
+$ErrorActionPreference = 'Stop'
+$user = '{user}'
+ssh $user@login.pax.tufts.edu -tt bash -lc "{cmd}"
+"""
+            if os.name == "nt":
+                self._run_powershell_file(script)
+            else:
+                self._spawn_terminal(script)
+
+    def cancel_all_jobs(self):
+        self._log_debug("cancel_all_jobs invoked")
+        if not which("ssh"):
+            messagebox.showerror("Missing SSH", "OpenSSH client (ssh) is not on PATH")
+            return
+        user = self.user_var.get().strip()
+        cmd = "echo Cancelling ALL jobs for $USER; scancel -u $USER; squeue -u $USER | sed -n '1,20p'"
+        if self.persistent_var.get():
+            self._log_debug("persistent mode: copying cancel_all_jobs cmd")
+            self.clipboard_clear()
+            self.clipboard_append(cmd)
+            self.shell_text.insert(tk.END, f"[copy] {cmd}\n"); self.shell_text.see(tk.END)
+        else:
+            script = f"""
+$ErrorActionPreference = 'Stop'
+$user = '{user}'
+ssh $user@login.pax.tufts.edu -tt bash -lc "{cmd}"
+"""
+            if os.name == "nt":
+                self._run_powershell_file(script)
+            else:
+                self._spawn_terminal(script)
+
+    def _init_debug(self):
+        self._log_q: "queue.Queue[str]" = queue.Queue()
+        def pump():
+            try:
+                while True:
+                    line = self._log_q.get_nowait()
+                    self.shell_text.insert(tk.END, line + "\n")
+                    self.shell_text.see(tk.END)
+            except queue.Empty:
+                pass
+            self.after(120, pump)
+        pump()
+
+    def _log_debug(self, msg: str):
+        self._log_q.put(f"[DEBUG] {msg}")
+
+    def _on_cmd_enter(self, _event=None):
+        cmd = self.cmd_entry.get().strip()
+        if not cmd:
+            return
+        self.cmd_entry.delete(0, tk.END)
+        self._run_local_async(cmd)
+
+    def _run_local_cmd(self):
+        cmd = self.cmd_entry.get().strip()
+        if not cmd:
+            messagebox.showinfo("Run", "Enter a command in the box above")
+            return
+        self._run_local_async(cmd)
+
+    def _run_local_async(self, cmd: str):
+        self._log_debug(f"run_local: {cmd}")
+        def worker():
+            try:
+                proc = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                for line in proc.stdout:  # type: ignore
+                    self._log_q.put(line.rstrip())
+                rc = proc.wait()
+                self._log_q.put(f"[exit {rc}]")
+            except Exception as e:
+                self._log_q.put(f"[error] {e}")
+        threading.Thread(target=worker, daemon=True).start()
+
+    def fix_current_env(self):
+        """Fix the current broken environment"""
+        self._log_debug("fix_current_env invoked")
+        if not which("ssh"):
+            messagebox.showerror("Missing SSH", "OpenSSH client (ssh) is not on PATH")
+            return
+        
+        user = self.user_var.get().strip()
+        part = self.partition_var.get().strip()
+        gres = self.gres_var.get().strip()
+        cpus = self.cpus_var.get().strip()
+        mem = self.mem_var.get().strip()
+        time = self.time_var.get().strip()
+        port = int(self.port_var.get())
+
+        # Fix environment script
+        script = f"""
+        $ErrorActionPreference = 'Stop'
+        $user = '{user}'
+        $port = {port}
+        ssh $user@login.pax.tufts.edu -tt @'
+          set -e
+          echo "Requesting GPU allocation to fix environment..."
+          srun -p {part} --gres=gpu:{gres} -c {cpus} --mem={mem} -t {time} --pty bash <<'EOF'
+            set -e
+            echo "=== Fixing Current Environment ==="
+            echo "Node: $(hostname)"
+            
+            # Initialize HPC modules
+            source /etc/profile.d/modules.sh
+            module load cuda/12.2
+            module load gcc/9.3.0
+            
+            # Initialize conda
+            source /cluster/tufts/hpc/tools/anaconda/202307/etc/profile.d/conda.sh
+            conda activate /cluster/tufts/em212class/$USER/conda_envs/video_gen
+            
+            # Set environment variables
+            export HF_HOME="/cluster/tufts/em212class/$USER/caches/huggingface"
+            export TRANSFORMERS_CACHE="/cluster/tufts/em212class/$USER/caches/huggingface"
+            export TORCH_HOME="/cluster/tufts/em212class/$USER/caches/torch"
+            export TMPDIR="/cluster/tufts/em212class/$USER/tmp"
+            
+            # Navigate to ComfyUI
+            cd /cluster/tufts/em212class/$USER/ComfyUI
+            
+            # Fix 1: Remove broken xformers
+            echo "🔧 Fixing xformers..."
+            pip uninstall xformers -y
+            
+            # Fix 2: Install compatible xformers
+            echo "📦 Installing compatible xformers..."
+            pip install xformers==0.0.22.post7 --no-cache-dir
+            
+            # Fix 3: Fix AnimateDiff (reinstall)
+            echo "🔧 Fixing AnimateDiff..."
+            cd custom_nodes
+            if [ -d "AnimateDiff" ]; then
+                rm -rf AnimateDiff
+            fi
+            git clone https://github.com/Kosinkadink/ComfyUI-AnimateDiff-Evolved.git AnimateDiff
+            cd ..
+            
+            # Fix 4: Install missing packages
+            echo "📦 Installing missing packages..."
+            pip install sentencepiece av sageattention --no-cache-dir
+            
+            # Test the fixes
+            echo "🧪 Testing fixes..."
+            python -c "import torch; print(f'✅ PyTorch: {torch.__version__}')"
+            python -c "import torch; print(f'✅ CUDA available: {torch.cuda.is_available()}')"
+            python -c "import sentencepiece; print('✅ sentencepiece works')"
+            python -c "import av; print('✅ av (PyAV) works')"
+            
+            echo "✅ Environment fixes complete!"
+            echo "🚀 Ready to test ComfyUI!"
+          EOF
+        '@
+        """
+
+        if self.persistent_var.get():
+            self._log_debug("persistent mode: copying fix script")
+            self.copy_fix_script()
+        else:
+            if os.name == "nt":
+                self._run_powershell_file(script)
+            else:
+                self._spawn_terminal(script)
+
+    def setup_wan22_clean(self):
+        """Setup clean Wan 2.2 + ComfyUI environment"""
+        self._log_debug("setup_wan22_clean invoked")
+        if not which("ssh"):
+            messagebox.showerror("Missing SSH", "OpenSSH client (ssh) is not on PATH")
+            return
+        
+        user = self.user_var.get().strip()
+        part = self.partition_var.get().strip()
+        gres = self.gres_var.get().strip()
+        cpus = self.cpus_var.get().strip()
+        mem = self.mem_var.get().strip()
+        time = self.time_var.get().strip()
+        port = int(self.port_var.get())
+
+        # Wan 2.2 clean setup script
+        script = f"""
+        $ErrorActionPreference = 'Stop'
+        $user = '{user}'
+        $port = {port}
+        ssh $user@login.pax.tufts.edu -tt @'
+          set -e
+          echo "Requesting GPU allocation for Wan 2.2 + ComfyUI setup..."
+          srun -p {part} --gres=gpu:{gres} -c {cpus} --mem={mem} -t {time} --pty bash <<'EOF'
+            set -e
+            echo "=== WAN 2.2 + ComfyUI Clean Setup ==="
+            echo "Node: $(hostname)"
+            
+            # Set up clean environment
+            export WORK_DIR="/cluster/tufts/em212class/$USER"
+            export CLEAN_ENV="$WORK_DIR/wan22_clean"
+            mkdir -p "$CLEAN_ENV"
+            cd "$CLEAN_ENV"
+            
+            # Initialize HPC modules
+            source /etc/profile.d/modules.sh
+            module load cuda/12.2
+            module load gcc/9.3.0
+            
+            # Initialize conda
+            source /cluster/tufts/hpc/tools/anaconda/202307/etc/profile.d/conda.sh
+            
+            # Create clean conda environment
+            conda create -p "$CLEAN_ENV/conda_envs/wan22" python=3.11 -y
+            conda activate "$CLEAN_ENV/conda_envs/wan22"
+            
+            # Install minimal required packages
+            pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+            pip install transformers diffusers accelerate opencv-python pillow imageio[ffmpeg] safetensors
+            
+            # Clone ComfyUI
+            git clone https://github.com/comfyanonymous/ComfyUI.git
+            cd ComfyUI
+            pip install -r requirements.txt
+            
+            # Install ComfyUI Manager
+            cd custom_nodes
+            git clone https://github.com/ltdrdata/ComfyUI-Manager.git
+            cd ..
+            
+            # Download Wan 2.2 models
+            echo "📥 Downloading Wan 2.2 models..."
+            python -c "
+from huggingface_hub import snapshot_download
+snapshot_download(repo_id='Comfy-Org/Wan_2.2_ComfyUI_Repackaged', local_dir='.', local_dir_use_symlinks=False)
+print('✅ Wan 2.2 models downloaded!')
+"
+            
+            # Set environment variables
+            export HF_HOME="$CLEAN_ENV/caches/huggingface"
+            export TRANSFORMERS_CACHE="$CLEAN_ENV/caches/huggingface"
+            export TORCH_HOME="$CLEAN_ENV/caches/torch"
+            export TMPDIR="$CLEAN_ENV/tmp"
+            mkdir -p "$HF_HOME" "$TORCH_HOME" "$TMPDIR"
+            
+            echo "✅ Wan 2.2 + ComfyUI setup complete!"
+            echo "🎬 Ready for high-quality video generation!"
+          EOF
+        '@
+        """
+
+        if self.persistent_var.get():
+            self._log_debug("persistent mode: copying Wan 2.2 setup script")
+            self.copy_wan22_setup()
+        else:
+            if os.name == "nt":
+                self._run_powershell_file(script)
+            else:
+                self._spawn_terminal(script)
+
+    def copy_wan22_setup(self):
+        """Copy Wan 2.2 setup script to clipboard"""
+        script = """
+# WAN 2.2 + ComfyUI Clean Setup
+echo "🎬 WAN 2.2 + ComfyUI Clean Setup"
+echo "================================="
+
+# Check if we're on HPC compute node
+if [[ "$(hostname)" =~ login ]]; then
+    echo "❌ ERROR: You're on the login node!"
+    echo "Please run: srun -p preempt --gres=gpu:a100:1 -c 30 --mem=100G -t 4:00:00 --pty bash"
+    echo "Then run this script again."
+    exit 1
+fi
+
+echo "✅ Running on compute node: $(hostname)"
+
+# Set up clean environment
+export WORK_DIR="/cluster/tufts/em212class/$USER"
+export CLEAN_ENV="$WORK_DIR/wan22_clean"
+mkdir -p "$CLEAN_ENV"
+cd "$CLEAN_ENV"
+
+# Initialize HPC modules
+source /etc/profile.d/modules.sh
+module load cuda/12.2
+module load gcc/9.3.0
+
+# Initialize conda
+source /cluster/tufts/hpc/tools/anaconda/202307/etc/profile.d/conda.sh
+
+# Create clean conda environment
+conda create -p "$CLEAN_ENV/conda_envs/wan22" python=3.11 -y
+conda activate "$CLEAN_ENV/conda_envs/wan22"
+
+# Install minimal required packages
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+pip install transformers diffusers accelerate opencv-python pillow imageio[ffmpeg] safetensors
+
+# Clone ComfyUI
+git clone https://github.com/comfyanonymous/ComfyUI.git
+cd ComfyUI
+pip install -r requirements.txt
+
+# Install ComfyUI Manager
+cd custom_nodes
+git clone https://github.com/ltdrdata/ComfyUI-Manager.git
+cd ..
+
+# Download Wan 2.2 models
+echo "📥 Downloading Wan 2.2 models..."
+python -c "
+from huggingface_hub import snapshot_download
+snapshot_download(repo_id='Comfy-Org/Wan_2.2_ComfyUI_Repackaged', local_dir='.', local_dir_use_symlinks=False)
+print('✅ Wan 2.2 models downloaded!')
+"
+
+# Set environment variables
+export HF_HOME="$CLEAN_ENV/caches/huggingface"
+export TRANSFORMERS_CACHE="$CLEAN_ENV/caches/huggingface"
+export TORCH_HOME="$CLEAN_ENV/caches/torch"
+export TMPDIR="$CLEAN_ENV/tmp"
+mkdir -p "$HF_HOME" "$TORCH_HOME" "$TMPDIR"
+
+echo "✅ Wan 2.2 + ComfyUI setup complete!"
+echo "🎬 Ready for high-quality video generation!"
+"""
+        self.clipboard_clear()
+        self.clipboard_append(script)
+        messagebox.showinfo("Copied", "Wan 2.2 setup script copied to clipboard")
+
+    def copy_fix_script(self):
+        """Copy fix script to clipboard"""
+        script = """
+# Fix Current Environment
+echo "🔧 Fixing Current Environment"
+echo "============================="
+
+# Check if we're on HPC compute node
+if [[ "$(hostname)" =~ login ]]; then
+    echo "❌ ERROR: You're on the login node!"
+    echo "Please run: srun -p preempt --gres=gpu:a100:1 -c 30 --mem=100G -t 4:00:00 --pty bash"
+    echo "Then run this script again."
+    exit 1
+fi
+
+echo "✅ Running on compute node: $(hostname)"
+
+# Initialize HPC modules
+source /etc/profile.d/modules.sh
+module load cuda/12.2
+module load gcc/9.3.0
+
+# Initialize conda
+source /cluster/tufts/hpc/tools/anaconda/202307/etc/profile.d/conda.sh
+conda activate /cluster/tufts/em212class/$USER/conda_envs/video_gen
+
+# Set environment variables
+export HF_HOME="/cluster/tufts/em212class/$USER/caches/huggingface"
+export TRANSFORMERS_CACHE="/cluster/tufts/em212class/$USER/caches/huggingface"
+export TORCH_HOME="/cluster/tufts/em212class/$USER/caches/torch"
+export TMPDIR="/cluster/tufts/em212class/$USER/tmp"
+
+# Navigate to ComfyUI
+cd /cluster/tufts/em212class/$USER/ComfyUI
+
+# Fix 1: Remove broken xformers
+echo "🔧 Fixing xformers..."
+pip uninstall xformers -y
+
+# Fix 2: Install compatible xformers
+echo "📦 Installing compatible xformers..."
+pip install xformers==0.0.22.post7 --no-cache-dir
+
+# Fix 3: Fix AnimateDiff (reinstall)
+echo "🔧 Fixing AnimateDiff..."
+cd custom_nodes
+if [ -d "AnimateDiff" ]; then
+    rm -rf AnimateDiff
+fi
+git clone https://github.com/Kosinkadink/ComfyUI-AnimateDiff-Evolved.git AnimateDiff
+cd ..
+
+# Fix 4: Install missing packages
+echo "📦 Installing missing packages..."
+pip install sentencepiece av sageattention --no-cache-dir
+
+# Test the fixes
+echo "🧪 Testing fixes..."
+python -c "import torch; print(f'✅ PyTorch: {torch.__version__}')"
+python -c "import torch; print(f'✅ CUDA available: {torch.cuda.is_available()}')"
+python -c "import sentencepiece; print('✅ sentencepiece works')"
+python -c "import av; print('✅ av (PyAV) works')"
+
+echo "✅ Environment fixes complete!"
+echo "🚀 Ready to test ComfyUI!"
+"""
+        self.clipboard_clear()
+        self.clipboard_append(script)
+        messagebox.showinfo("Copied", "Fix script copied to clipboard")
+
+    def backup_comfyui_user_files(self):
+        """Backup all ComfyUI user files: outputs, inputs, workflows, etc."""
+        self._log_debug("backup_comfyui_user_files invoked")
+        user = self.user_var.get().strip()
+        script = f"""
+# BACKUP ALL COMFYUI USER FILES
+echo "📦 Backing up ALL ComfyUI user files..."
+echo "========================================"
+echo "Includes: outputs, uploaded assets (input), saved workflows, and all user data"
+echo ""
+
+# Navigate to your ComfyUI directory
+cd /cluster/tufts/em212class/$USER/ComfyUI
+
+# Check what user directories exist
+echo "📁 Checking user directories:"
+echo "Output directory (generated images/videos):"
+du -sh output/ 2>/dev/null || echo "  No output directory found"
+echo ""
+echo "Input directory (uploaded assets):"
+du -sh input/ 2>/dev/null || echo "  No input directory found"
+echo ""
+echo "User directory (workflows, settings, configs):"
+du -sh user/ 2>/dev/null || echo "  No user directory found"
+echo ""
+echo "Workflows directory (if separate):"
+du -sh workflows/ 2>/dev/null || echo "  No workflows directory found"
+echo ""
+echo "Temp directory (temporary files):"
+du -sh temp/ 2>/dev/null || echo "  No temp directory found"
+echo ""
+
+# Show detailed contents
+echo "📋 Detailed contents:"
+echo "Output files:"
+ls -lh output/ 2>/dev/null | head -n 10 || echo "  (empty or not found)"
+echo ""
+echo "Input files (uploaded assets):"
+ls -lh input/ 2>/dev/null | head -n 10 || echo "  (empty or not found)"
+echo ""
+echo "Workflow JSONs (in user/):"
+find user/ -name "*.json" -type f 2>/dev/null | head -n 10 || echo "  (no workflows found in user/)"
+echo ""
+echo "Workflow JSONs (in workflows/):"
+find workflows/ -name "*.json" -type f 2>/dev/null | head -n 10 || echo "  (no workflows found in workflows/)"
+echo ""
+
+# Create tar archive of ALL user files (include all directories that might exist)
+echo "🗜️  Creating archive of all user files..."
+ARCHIVE_NAME="comfyui_user_files_$(date +%Y%m%d_%H%M%S).tar.gz"
+# Build list of directories that actually exist
+TAR_DIRS=""
+[ -d "output" ] && TAR_DIRS="$TAR_DIRS output/"
+[ -d "input" ] && TAR_DIRS="$TAR_DIRS input/"
+[ -d "user" ] && TAR_DIRS="$TAR_DIRS user/"
+[ -d "workflows" ] && TAR_DIRS="$TAR_DIRS workflows/"
+[ -d "temp" ] && TAR_DIRS="$TAR_DIRS temp/"
+
+if [ -z "$TAR_DIRS" ]; then
+    echo "⚠️  WARNING: No user directories found to backup!"
+    echo "  (output/, input/, user/, workflows/, temp/ all missing)"
+else
+    echo "📦 Archiving directories: $TAR_DIRS"
+    tar -czf ~/$ARCHIVE_NAME $TAR_DIRS 2>/dev/null
+fi
+
+# Check the archive size
+echo ""
+echo "✅ Archive created:"
+ls -lh ~/comfyui_user_files_*.tar.gz | tail -n 1
+
+echo ""
+echo "📊 Archive contents:"
+tar -tzf ~/$ARCHIVE_NAME | head -n 20
+echo "  ... (showing first 20 files)"
+
+echo ""
+echo "📥 Next steps:"
+echo "1. Download: scp {user}@login.pax.tufts.edu:~/comfyui_user_files_*.tar.gz ."
+echo "2. Verify download on your local machine"
+echo "3. Extract and verify contents: tar -tzf comfyui_user_files_*.tar.gz"
+echo "4. Clean up server (after verification): Use 'Clean All User Files' button"
+""".strip()
+        self.clipboard_clear()
+        self.clipboard_append(script)
+        messagebox.showinfo("Copied", "Backup all user files script copied to clipboard!\n\nIncludes:\n- outputs/ (generated images/videos)\n- input/ (uploaded assets)\n- user/ (workflows, settings, configs)\n- workflows/ (if separate)\n- temp/ (temporary files)\n\nRun this on the HPC login node.")
+
+    def copy_download_user_files(self):
+        """Copy SCP command to download all user files archive"""
+        self._log_debug("copy_download_user_files invoked")
+        user = self.user_var.get().strip()
+        cmd = f"scp {user}@login.pax.tufts.edu:~/comfyui_user_files_*.tar.gz ."
+        self.clipboard_clear()
+        self.clipboard_append(cmd)
+        messagebox.showinfo("Copied", f"SCP download command copied!\n\nRun this on your LOCAL PC in PowerShell:\n\n{cmd}\n\nNavigate to your desired download folder first (e.g., cd C:\\Users\\sdtyu\\Downloads)\n\nAfter download, verify with: tar -tzf comfyui_user_files_*.tar.gz")
+
+    def copy_clean_user_files(self):
+        """Copy cleanup commands for all user files"""
+        self._log_debug("copy_clean_user_files invoked")
+        user = self.user_var.get().strip()
+        script = f"""
+#!/bin/bash
+# CLEANUP ALL COMFYUI USER FILES
+echo "🧹 Cleaning up ALL ComfyUI user files..."
+echo "=========================================="
+echo "This will remove: outputs, inputs, workflows, temp files, and all user data"
+echo ""
+
+echo "📊 Current disk usage in ComfyUI user directories:"
+echo "Output directory (generated images/videos):"
+du -sh /cluster/tufts/em212class/$USER/ComfyUI/output 2>/dev/null || echo "  No output directory"
+echo ""
+echo "Input directory (uploaded assets):"
+du -sh /cluster/tufts/em212class/$USER/ComfyUI/input 2>/dev/null || echo "  No input directory"
+echo ""
+echo "User directory (workflows, settings, configs):"
+du -sh /cluster/tufts/em212class/$USER/ComfyUI/user 2>/dev/null || echo "  No user directory"
+echo ""
+echo "Workflows directory (if separate):"
+du -sh /cluster/tufts/em212class/$USER/ComfyUI/workflows 2>/dev/null || echo "  No workflows directory"
+echo ""
+echo "Temp directory (temporary files):"
+du -sh /cluster/tufts/em212class/$USER/ComfyUI/temp 2>/dev/null || echo "  No temp directory"
+echo ""
+
+echo "🗑️  Removing all user directories..."
+
+# Remove output directory (generated images/videos)
+if [ -d "/cluster/tufts/em212class/$USER/ComfyUI/output" ]; then
+    echo "  Removing output/..."
+    rm -rf /cluster/tufts/em212class/$USER/ComfyUI/output
+    echo "    ✅ Removed output/"
+else
+    echo "  ⏭️  output/ not found (skipping)"
+fi
+
+# Remove input directory (uploaded assets)
+if [ -d "/cluster/tufts/em212class/$USER/ComfyUI/input" ]; then
+    echo "  Removing input/..."
+    rm -rf /cluster/tufts/em212class/$USER/ComfyUI/input
+    echo "    ✅ Removed input/"
+else
+    echo "  ⏭️  input/ not found (skipping)"
+fi
+
+# Remove user directory (workflows, settings, configs, etc.)
+if [ -d "/cluster/tufts/em212class/$USER/ComfyUI/user" ]; then
+    echo "  Removing user/..."
+    rm -rf /cluster/tufts/em212class/$USER/ComfyUI/user
+    echo "    ✅ Removed user/"
+else
+    echo "  ⏭️  user/ not found (skipping)"
+fi
+
+# Remove workflows directory (if it exists separately from user/)
+if [ -d "/cluster/tufts/em212class/$USER/ComfyUI/workflows" ]; then
+    echo "  Removing workflows/..."
+    rm -rf /cluster/tufts/em212class/$USER/ComfyUI/workflows
+    echo "    ✅ Removed workflows/"
+else
+    echo "  ⏭️  workflows/ not found (skipping)"
+fi
+
+# Remove temp directory (temporary files)
+if [ -d "/cluster/tufts/em212class/$USER/ComfyUI/temp" ]; then
+    echo "  Removing temp/..."
+    rm -rf /cluster/tufts/em212class/$USER/ComfyUI/temp
+    echo "    ✅ Removed temp/"
+else
+    echo "  ⏭️  temp/ not found (skipping)"
+fi
+
+# Remove backup tar files
+echo ""
+echo "🗑️  Removing backup tar files..."
+rm -f ~/comfyui_user_files_*.tar.gz
+echo "    ✅ Removed backup archives"
+
+echo ""
+echo "✅ Cleanup complete!"
+echo ""
+echo "📊 Remaining disk usage in ComfyUI:"
+du -sh /cluster/tufts/em212class/$USER/ComfyUI 2>/dev/null || echo "  ComfyUI directory not found"
+echo ""
+echo "📁 Remaining directories in ComfyUI:"
+ls -la /cluster/tufts/em212class/$USER/ComfyUI/ 2>/dev/null | grep "^d" | grep -v "^\.$" | grep -v "^\.\.$" || echo "  (no directories found)"
+""".strip()
+        self.clipboard_clear()
+        self.clipboard_append(script)
+        messagebox.showinfo("Copied", "Cleanup all user files script copied to clipboard!\n\n⚠️ WARNING: This will IMMEDIATELY remove ALL user files including:\n- Generated outputs (images/videos)\n- Uploaded assets (input/)\n- Saved workflows (user/ and workflows/)\n- Temporary files (temp/)\n\n📝 TO RUN: Paste the entire script into your HPC terminal.\nIf pasting doesn't work, save it to a file:\n  cat > cleanup.sh << 'EOF'\n  [paste script here]\n  EOF\n  chmod +x cleanup.sh\n  ./cleanup.sh\n\n⚠️ Make sure your backup was downloaded successfully before running!")
+
+    def open_h200_login(self):
+        """Open SSH shell to H200 login-prod node"""
+        self._log_debug("open_h200_login invoked")
+        user = self.user_var.get().strip()
+        cmd = f"ssh {user}@login-prod.pax.tufts.edu"
+        self._spawn_terminal(cmd)
+
+    def copy_h200_login_cmd(self):
+        """Copy H200 login command to clipboard"""
+        self._log_debug("copy_h200_login_cmd invoked")
+        user = self.user_var.get().strip()
+        cmd = f"ssh {user}@login-prod.pax.tufts.edu"
+        self.clipboard_clear()
+        self.clipboard_append(cmd)
+        messagebox.showinfo("Copied", "H200 login SSH command copied to clipboard")
+
+    def open_h200_alloc(self):
+        """Open H200 GPU allocation shell"""
+        self._log_debug("open_h200_alloc invoked")
+        user = self.user_var.get().strip()
+        # H200 specific allocation settings
+        cmd = f"ssh {user}@login-prod.pax.tufts.edu -tt srun -p gpu --gres=gpu:h200 -c 16 --mem=120G -t 5:00:00 --pty bash"
+        self._spawn_terminal(cmd)
+
+    def copy_h200_alloc_cmd(self):
+        """Copy H200 allocation command to clipboard"""
+        self._log_debug("copy_h200_alloc_cmd invoked")
+        cmd = "srun -p gpu --gres=gpu:h200 -c 16 --mem=120G -t 5:00:00 --pty bash"
+        self.clipboard_clear()
+        self.clipboard_append(cmd)
+        messagebox.showinfo("Copied", "H200 allocation srun command copied to clipboard")
+
+    def start_h200_comfyui(self):
+        """Start ComfyUI on H200 node with proper setup"""
+        self._log_debug("start_h200_comfyui invoked")
+        if not which("ssh"):
+            messagebox.showerror("Missing SSH", "OpenSSH client (ssh) is not on PATH")
+            return
+        user = self.user_var.get().strip()
+        port = 7860  # H200 uses port 7860
+
+        # H200 ComfyUI setup script
+        script = f"""
+        $ErrorActionPreference = 'Stop'
+        $user = '{user}'
+        $port = {port}
+        ssh $user@login-prod.pax.tufts.edu -tt @'
+          set -e
+          echo "Requesting H200 GPU allocation for ComfyUI..."
+          srun -p gpu --gres=gpu:h200 -c 16 --mem=120G -t 5:00:00 --pty bash <<'EOF'
+            echo "=== CRITICAL: Initialize module system FIRST ==="
+            source /etc/profile.d/modules.sh
+            
+            # Try to load CUDA module (optional, PyTorch may have CUDA built-in)
+            echo "=== Attempting to load CUDA module ==="
+            if module avail cuda 2>&1 | grep -q "cuda"; then
+                CUDA_VERSION=$(module avail cuda 2>&1 | grep -o "cuda/[0-9.]*" | head -n 1)
+                if [ -n "$CUDA_VERSION" ]; then
+                    echo "Loading: $CUDA_VERSION"
+                    module load $CUDA_VERSION || echo "⚠️  CUDA module load failed (continuing anyway)"
+                else
+                    module load cuda 2>/dev/null || echo "⚠️  CUDA module not available (continuing anyway)"
+                fi
+            else
+                echo "⚠️  CUDA module not available (continuing anyway)"
+            fi
+            
+            # Try to load GCC module (optional)
+            echo "=== Attempting to load GCC module ==="
+            if module avail gcc 2>&1 | grep -q "gcc"; then
+                GCC_VERSION=$(module avail gcc 2>&1 | grep -o "gcc/[0-9.]*" | head -n 1)
+                if [ -n "$GCC_VERSION" ]; then
+                    echo "Loading: $GCC_VERSION"
+                    module load $GCC_VERSION || echo "⚠️  GCC module load failed (continuing anyway)"
+                else
+                    module load gcc 2>/dev/null || echo "⚠️  GCC module not available (continuing anyway)"
+                fi
+            else
+                echo "⚠️  GCC module not available (continuing anyway)"
+            fi
+            
+            # Check CUDA version (if nvcc is available)
+            echo "=== Checking CUDA version ==="
+            if command -v nvcc &> /dev/null; then
+                nvcc --version || echo "CUDA check failed"
+            else
+                echo "⚠️  nvcc not found (CUDA may be provided by PyTorch)"
+            fi
+            
+            echo "=== Initializing conda ==="
+            source /cluster/tufts/hpc/tools/anaconda/202307/etc/profile.d/conda.sh
+            
+            echo "=== Activating video_gen conda environment ==="
+            conda activate /cluster/tufts/em212class/$USER/conda_envs/video_gen
+            
+            echo "=== Setting environment variables ==="
+            export HF_HOME="/cluster/tufts/em212class/$USER/caches/huggingface"
+            export TRANSFORMERS_CACHE="/cluster/tufts/em212class/$USER/caches/huggingface"
+            export TORCH_HOME="/cluster/tufts/em212class/$USER/caches/torch"
+            export TMPDIR="/cluster/tufts/em212class/$USER/tmp"
+            
+            echo "=== Testing setup ==="
+            python -c "import torch; print(f'✅ PyTorch: {{torch.__version__}}')"
+            python -c "import torch; print(f'✅ CUDA available: {{torch.cuda.is_available()}}')"
+            
+            echo "=== Navigating to ComfyUI directory ==="
+            cd /cluster/tufts/em212class/$USER/ComfyUI
+            
+            # Check if port 7860 is already in use, if so use 7861
+            echo "=== Checking port availability ==="
+            FINAL_PORT=$port
+            if lsof -i :$port &>/dev/null || netstat -tuln 2>/dev/null | grep -q ":$port "; then
+                echo "⚠️  Port $port is already in use, switching to port 7861"
+                FINAL_PORT=7861
+                # Check if 7861 is also in use
+                if lsof -i :7861 &>/dev/null || netstat -tuln 2>/dev/null | grep -q ":7861 "; then
+                    echo "⚠️  Port 7861 is also in use! Please free up a port or use a different one."
+                    exit 1
+                fi
+            else
+                echo "✅ Port $port is available"
+            fi
+            
+            echo "=== Starting ComfyUI on H200 GPU (background with nohup) ==="
+            echo "=== Node: $(hostname) ==="
+            echo "=== Port: $FINAL_PORT ==="
+            echo "=== Log file: comfyui_$FINAL_PORT.log ==="
+            echo ""
+            echo "🌐 TO ACCESS COMFYUI FROM YOUR LOCAL MACHINE:"
+            echo "Run this SSH tunnel command in a NEW terminal window:"
+            echo "ssh -L $FINAL_PORT:$(hostname):$FINAL_PORT $user@login-prod.pax.tufts.edu"
+            echo ""
+            echo "Then open in your browser:"
+            echo "http://localhost:$FINAL_PORT"
+            echo ""
+            echo "📋 To check the log file:"
+            echo "tail -f comfyui_$FINAL_PORT.log"
+            echo ""
+            
+            # Start ComfyUI with nohup in background
+            nohup python main.py --listen 0.0.0.0 --port $FINAL_PORT --gpu-only > comfyui_$FINAL_PORT.log 2>&1 &
+            COMFYUI_PID=$!
+            echo "✅ ComfyUI started in background (PID: $COMFYUI_PID)"
+            echo "📋 Monitor with: tail -f comfyui_$FINAL_PORT.log"
+            echo "🛑 Stop with: kill $COMFYUI_PID"
+            echo ""
+            sleep 3
+            echo "=== Checking if ComfyUI started successfully ==="
+            if ps -p $COMFYUI_PID > /dev/null; then
+                echo "✅ ComfyUI is running (PID: $COMFYUI_PID)"
+            else
+                echo "⚠️  ComfyUI process may have failed. Check log: tail -f comfyui_$FINAL_PORT.log"
+            fi
+          EOF
+        '@
+        """
+
+        if self.persistent_var.get():
+            self._log_debug("persistent mode: copying H200 ComfyUI setup script")
+            self.copy_h200_comfyui_setup()
+        else:
+            if os.name == "nt":
+                self._run_powershell_file(script)
+            else:
+                self._spawn_terminal(script)
+
+    def copy_h200_comfyui_setup(self):
+        """Copy H200 ComfyUI setup script to clipboard"""
+        self._log_debug("copy_h200_comfyui_setup invoked")
+        port = 7860
+        script = f"""
+# H200 COMFYUI SETUP - Run this on H200 compute node
+echo "=== H200 COMFYUI SETUP ==="
+echo "⚠️  WARNING: You must be on H200 compute node first!"
+echo "Run: srun -p gpu --gres=gpu:h200 -c 16 --mem=120G -t 5:00:00 --pty bash"
+echo ""
+
+# CRITICAL: Check we're NOT on login node
+if [[ $(hostname) == login* ]]; then
+    echo "❌❌❌ FATAL ERROR: ON LOGIN NODE ❌❌❌"
+    echo "NEVER run computational work on login nodes!"
+    echo "You will get yelled at by admins!"
+    echo ""
+    echo "Request H200 compute node with:"
+    echo "srun -p gpu --gres=gpu:h200 -c 16 --mem=120G -t 5:00:00 --pty bash"
+    exit 1
+fi
+
+echo "✅ On compute node: $(hostname)"
+
+# CRITICAL: Initialize module system FIRST
+echo "=== Initializing module system ==="
+source /etc/profile.d/modules.sh
+
+# Try to load CUDA module (optional, PyTorch may have CUDA built-in)
+echo "=== Attempting to load CUDA module ==="
+if module avail cuda 2>&1 | grep -q "cuda"; then
+    # Try to find available CUDA version
+    CUDA_VERSION=$(module avail cuda 2>&1 | grep -o "cuda/[0-9.]*" | head -n 1)
+    if [ -n "$CUDA_VERSION" ]; then
+        echo "Loading: $CUDA_VERSION"
+        module load $CUDA_VERSION || echo "⚠️  CUDA module load failed (continuing anyway)"
+    else
+        module load cuda 2>/dev/null || echo "⚠️  CUDA module not available (continuing anyway)"
+    fi
+else
+    echo "⚠️  CUDA module not available in module system (continuing anyway)"
+fi
+
+# Try to load GCC module (optional)
+echo "=== Attempting to load GCC module ==="
+if module avail gcc 2>&1 | grep -q "gcc"; then
+    # Try to find available GCC version
+    GCC_VERSION=$(module avail gcc 2>&1 | grep -o "gcc/[0-9.]*" | head -n 1)
+    if [ -n "$GCC_VERSION" ]; then
+        echo "Loading: $GCC_VERSION"
+        module load $GCC_VERSION || echo "⚠️  GCC module load failed (continuing anyway)"
+    else
+        module load gcc 2>/dev/null || echo "⚠️  GCC module not available (continuing anyway)"
+    fi
+else
+    echo "⚠️  GCC module not available in module system (continuing anyway)"
+fi
+
+# Check CUDA version (if nvcc is available)
+echo "=== Checking CUDA version ==="
+if command -v nvcc &> /dev/null; then
+    nvcc --version || echo "CUDA check failed"
+else
+    echo "⚠️  nvcc not found (CUDA may be provided by PyTorch)"
+fi
+
+# Initialize conda
+echo "=== Initializing conda ==="
+source /cluster/tufts/hpc/tools/anaconda/202307/etc/profile.d/conda.sh
+
+# Activate video_gen environment
+echo "=== Activating video_gen conda environment ==="
+conda activate /cluster/tufts/em212class/$USER/conda_envs/video_gen
+
+# Set environment variables
+echo "=== Setting environment variables ==="
+export HF_HOME="/cluster/tufts/em212class/$USER/caches/huggingface"
+export TRANSFORMERS_CACHE="/cluster/tufts/em212class/$USER/caches/huggingface"
+export TORCH_HOME="/cluster/tufts/em212class/$USER/caches/torch"
+export TMPDIR="/cluster/tufts/em212class/$USER/tmp"
+
+# Test the setup
+echo "=== Testing setup ==="
+python -c "import torch; print(f'✅ PyTorch: {{torch.__version__}}')"
+python -c "import torch; print(f'✅ CUDA available: {{torch.cuda.is_available()}}')"
+
+# Navigate to ComfyUI directory
+cd /cluster/tufts/em212class/$USER/ComfyUI
+
+# Check if port 7860 is already in use, if so use 7861
+echo "=== Checking port availability ==="
+FINAL_PORT={port}
+if lsof -i :{port} &>/dev/null || netstat -tuln 2>/dev/null | grep -q ":{port} "; then
+    echo "⚠️  Port {port} is already in use, switching to port 7861"
+    FINAL_PORT=7861
+    # Check if 7861 is also in use
+    if lsof -i :7861 &>/dev/null || netstat -tuln 2>/dev/null | grep -q ":7861 "; then
+        echo "⚠️  Port 7861 is also in use! Please free up a port or use a different one."
+        exit 1
+    fi
+else
+    echo "✅ Port {port} is available"
+fi
+
+echo "=== Starting ComfyUI on H200 GPU (background with nohup) ==="
+echo "=== Node: $(hostname) ==="
+echo "=== Port: $FINAL_PORT ==="
+echo "=== Log file: comfyui_$FINAL_PORT.log ==="
+echo ""
+echo "🌐 TO ACCESS COMFYUI FROM YOUR LOCAL MACHINE:"
+echo "Run this SSH tunnel command in a NEW terminal window:"
+echo "ssh -L $FINAL_PORT:$(hostname):$FINAL_PORT $USER@login-prod.pax.tufts.edu"
+echo ""
+echo "Then open in your browser:"
+echo "http://localhost:$FINAL_PORT"
+echo ""
+echo "📋 To check the log file:"
+echo "tail -f comfyui_$FINAL_PORT.log"
+echo ""
+
+# Start ComfyUI with nohup in background
+nohup python main.py --listen 0.0.0.0 --port $FINAL_PORT --gpu-only > comfyui_$FINAL_PORT.log 2>&1 &
+COMFYUI_PID=$!
+echo "✅ ComfyUI started in background (PID: $COMFYUI_PID)"
+echo "📋 Monitor with: tail -f comfyui_$FINAL_PORT.log"
+echo "🛑 Stop with: kill $COMFYUI_PID"
+echo ""
+sleep 3
+echo "=== Checking if ComfyUI started successfully ==="
+if ps -p $COMFYUI_PID > /dev/null; then
+    echo "✅ ComfyUI is running (PID: $COMFYUI_PID)"
+else
+    echo "⚠️  ComfyUI process may have failed. Check log: tail -f comfyui_$FINAL_PORT.log"
+fi
+""".strip()
+        self.clipboard_clear()
+        self.clipboard_append(script)
+        messagebox.showinfo("Copied", "H200 ComfyUI setup script copied to clipboard!")
+
+    def copy_h200_tunnel(self):
+        """Copy H200 SSH tunnel command to clipboard"""
+        self._log_debug("copy_h200_tunnel invoked")
+        user = self.user_var.get().strip()
+        port = 7860
+        node = self.node_var.get().strip()
+        if not node:
+            # Default to pax008 as shown in user's notes, but mention it can be changed
+            cmd = f"ssh -L {port}:pax008:{port} {user}@login-prod.pax.tufts.edu"
+            messagebox.showinfo("Copied", f"H200 tunnel command copied!\n\n{cmd}\n\n⚠️ NOTE: Replace 'pax008' with your actual compute node name if different.")
+        else:
+            cmd = f"ssh -L {port}:{node}:{port} {user}@login-prod.pax.tufts.edu"
+            messagebox.showinfo("Copied", f"H200 tunnel command copied!\n\n{cmd}")
+        self.clipboard_clear()
+        self.clipboard_append(cmd)
+
+
+if __name__ == "__main__":
+    App().mainloop()
+
+
